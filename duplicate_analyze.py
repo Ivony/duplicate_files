@@ -12,20 +12,43 @@ class DuplicateAnalyzer:
         self.total_deletable_files = 0
         self.total_savable_space = 0
         self.avg_count = 0
+        self.path_limit = None
         
+    def reset_stats(self):
+        self.duplicate_groups = []
+        self.total_groups = 0
+        self.total_files = 0
+        self.total_size = 0
+        self.max_files_in_group = 0
+        self.total_deletable_files = 0
+        self.total_savable_space = 0
+        self.avg_count = 0
+
     def load_data(self):
+        self.reset_stats()
         print("正在加载数据...")
         conn = sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
         cursor = conn.cursor()
         
-        cursor.execute('''
-        SELECT Hash, Size, COUNT(*) as count
-        FROM Hash
-        WHERE Hash != '' AND Hash IS NOT NULL
-        GROUP BY Hash, Size
-        HAVING count > 1
-        ORDER BY (count - 1) * Size DESC
-        ''')
+        if self.path_limit:
+            print(f"限制检索范围: {self.path_limit}")
+            cursor.execute('''
+            SELECT Hash, Size, COUNT(*) as count
+            FROM Hash
+            WHERE Hash != '' AND Hash IS NOT NULL AND Filepath LIKE ?
+            GROUP BY Hash, Size
+            HAVING count > 1
+            ORDER BY (count - 1) * Size DESC
+            ''', (f"{self.path_limit}%",))
+        else:
+            cursor.execute('''
+            SELECT Hash, Size, COUNT(*) as count
+            FROM Hash
+            WHERE Hash != '' AND Hash IS NOT NULL
+            GROUP BY Hash, Size
+            HAVING count > 1
+            ORDER BY (count - 1) * Size DESC
+            ''')
         
         self.duplicate_groups = cursor.fetchall()
         self.total_groups = len(self.duplicate_groups)
@@ -46,12 +69,20 @@ class DuplicateAnalyzer:
         conn = sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
         cursor = conn.cursor()
         
-        cursor.execute('''
-        SELECT Filepath, Size, Modified
-        FROM Hash
-        WHERE Hash = ?
-        ORDER BY Modified DESC
-        ''', (hash_value,))
+        if self.path_limit:
+            cursor.execute('''
+            SELECT Filepath, Size, Modified
+            FROM Hash
+            WHERE Hash = ? AND Filepath LIKE ?
+            ORDER BY Modified DESC
+            ''', (hash_value, f"{self.path_limit}%"))
+        else:
+            cursor.execute('''
+            SELECT Filepath, Size, Modified
+            FROM Hash
+            WHERE Hash = ?
+            ORDER BY Modified DESC
+            ''', (hash_value,))
         
         files = cursor.fetchall()
         conn.close()
@@ -65,6 +96,8 @@ class DuplicateAnalyzer:
     def show_stat(self):
         print(f"\n重复文件统计报告")
         print(f"=" * 60)
+        if self.path_limit:
+            print(f"当前限制范围: {self.path_limit}")
         print(f"总共有 {self.total_groups} 组重复的文件")
         print(f"包含重复文件最多的组包含了 {self.max_files_in_group} 个文件")
         print(f"重复文件总数: {self.total_files} 个")
@@ -78,6 +111,8 @@ class DuplicateAnalyzer:
     def show_top_groups(self, count=20):
         print(f"\n最大的{count}个重复文件组（按可释放空间排序）:")
         print(f"=" * 60)
+        if self.path_limit:
+            print(f"当前限制范围: {self.path_limit}")
         
         for i, (hash_value, file_size, file_count) in enumerate(self.duplicate_groups[:count], 1):
             group_size = file_size * file_count
@@ -104,6 +139,8 @@ class DuplicateAnalyzer:
         print(f"=" * 60)
         print(f"  stat      - 显示重复文件统计信息")
         print(f"  top [N]   - 显示最大的N个重复文件组（默认20个）")
+        print(f"  limit [PATH] - 限制检索范围到指定路径（如 C: 或 C:\\Users）")
+        print(f"              不带参数时解除限制")
         print(f"  help      - 显示此帮助信息")
         print(f"  quit      - 退出程序")
         print(f"=" * 60)
@@ -143,6 +180,25 @@ class DuplicateAnalyzer:
                         print("错误：请输入有效的数字")
                 elif command == 'top':
                     self.show_top_groups(20)
+                elif command.startswith('limit '):
+                    parts = command.split(maxsplit=1)
+                    if len(parts) > 1:
+                        new_path = parts[1].strip()
+                        if new_path:
+                            self.path_limit = new_path
+                            print(f"已设置检索范围限制: {self.path_limit}")
+                            self.load_data()
+                        else:
+                            self.path_limit = None
+                            print("已解除检索范围限制")
+                            self.load_data()
+                elif command == 'limit':
+                    if self.path_limit:
+                        print(f"已解除检索范围限制（原限制: {self.path_limit}）")
+                        self.path_limit = None
+                        self.load_data()
+                    else:
+                        print("当前没有设置检索范围限制")
                 else:
                     print(f"未知命令: {command}，输入 help 查看帮助")
                     
