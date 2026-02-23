@@ -47,7 +47,7 @@ def calculate_file_hash(file_path, db_size, db_modified, db_hash_data):
             hash_size = db_hash_data[0]
             hash_modified = db_hash_data[1]
             
-            if abs(actual_modified - hash_modified) < 0.001:
+            if actual_size == hash_size and abs(actual_modified - hash_modified) < 0.001:
                 return file_path, actual_size, '', actual_modified, False
         
         hasher = hashlib.md5()
