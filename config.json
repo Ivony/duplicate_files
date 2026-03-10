@@ -1,0 +1,6 @@
+{
+  "limit_path": null,
+  "excluded_patterns": [
+    ".*\\\\\\\\System Volume Information.*"
+  ]
+}

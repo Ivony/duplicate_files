@@ -1,218 +1,206 @@
 import sqlite3
 import os
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-from collections import defaultdict
-import config
-import re
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def is_path_excluded(file_path):
-    for pattern in config.excluded_paths:
-        if re.match(pattern, file_path):
-            return True
-    return False
-
-def get_file_info(file_path):
-    try:
-        if not os.path.exists(file_path):
-            return None
-        
-        stat = os.stat(file_path)
-        return {
-            'size': stat.st_size,
-            'modified': stat.st_mtime
-        }
-    except Exception as e:
-        print(f"获取文件信息失败 {file_path}: {e}")
-        return None
-
-def calculate_file_hash(file_path, db_size, db_modified, db_hash_data):
-    try:
-        if db_size == 0:
-            return file_path, db_size, '', db_modified, True
-        
-        file_info = get_file_info(file_path)
-        if file_info is None:
-            return None
-        
-        actual_size = file_info['size']
-        actual_modified = file_info['modified']
-        
-        if actual_size != db_size:
-            print(f"文件大小不匹配 {file_path}: 数据库={db_size}, 实际={actual_size}")
-            return None
-        
-        if db_hash_data is not None:
-            hash_size = db_hash_data[0]
-            hash_modified = db_hash_data[1]
-            
-            if actual_size == hash_size and abs(actual_modified - hash_modified) < 0.001:
-                return file_path, actual_size, '', actual_modified, False
-        
-        hasher = hashlib.md5()
-        with open(file_path, 'rb') as f:
-            while chunk := f.read(65536):
-                hasher.update(chunk)
-        
-        return file_path, actual_size, hasher.hexdigest(), actual_modified, True
-    except Exception as e:
-        print(f"计算哈希失败 {file_path}: {e}")
-        return None
-
-def process_disk_files(db_path, disk, files):
-    conn = sqlite3.connect(db_path, timeout=30.0, isolation_level='DEFERRED')
-    cursor = conn.cursor()
+class HashCalculator:
+    def __init__(self, db_path='file_index.db'):
+        self.db_path = db_path
+        self.total_processed = 0
+        self.total_calculated = 0
+        self.total_skipped = 0
+        self.start_time = 0
     
-    file_dict = {file_path: (size, modified) for file_path, size, modified in files}
-    file_paths = list(file_dict.keys())
+    def get_connection(self):
+        """获取数据库连接"""
+        return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
     
-    hash_data = {}
-    batch_size = 500
-    for i in range(0, len(file_paths), batch_size):
-        batch = file_paths[i:i+batch_size]
-        placeholders = ','.join(['?'] * len(batch))
-        cursor.execute(f'SELECT Filepath, Size, Modified FROM Hash WHERE Filepath IN ({placeholders})', batch)
-        for row in cursor.fetchall():
-            hash_data[row[0]] = (row[1], row[2])
-    
-    processed = 0
-    skipped = 0
-    calculated = 0
-    start_time = time.time()
-    last_calc_time = time.time()
-    
-    for file_path in file_paths:
+    def get_file_info(self, file_path):
+        """获取文件信息"""
         try:
-            result = calculate_file_hash(file_path, file_dict[file_path][0], file_dict[file_path][1], hash_data.get(file_path))
-            if result:
-                path, size, hash_val, modified_time, was_calculated = result
-                
-                if was_calculated:
-                    cursor.execute('''
-                    INSERT OR REPLACE INTO Hash (Filepath, Size, Hash, Modified)
-                    VALUES (?, ?, ?, ?)
-                    ''', (path, size, hash_val, modified_time))
-                    conn.commit()
-                    calculated += 1
-                    
-                    current_time = time.time()
-                    elapsed_since_last = current_time - last_calc_time
-                    if elapsed_since_last > 0:
-                        current_speed = 1 / elapsed_since_last
-                        total_to_process = len(file_paths) - skipped
-                        print(f"计算哈希: [{calculated}/{total_to_process}] {path} ({current_speed:.1f} 文件/秒)")
-                    last_calc_time = current_time
-                else:
-                    skipped += 1
-                
-                processed += 1
-                    
+            if not os.path.exists(file_path):
+                return None
+            
+            stat = os.stat(file_path)
+            return {
+                'size': stat.st_size,
+                'modified': stat.st_mtime
+            }
         except Exception as e:
-            print(f"处理文件 {file_path} 时出错: {e}")
+            print(f"获取文件信息失败 {file_path}: {e}")
+            return None
     
-    conn.close()
+    def calculate_file_hash(self, file_path):
+        """计算单个文件的哈希值"""
+        try:
+            file_info = self.get_file_info(file_path)
+            if file_info is None:
+                return None
+            
+            hasher = hashlib.md5()
+            with open(file_path, 'rb') as f:
+                while chunk := f.read(65536):
+                    hasher.update(chunk)
+            
+            return {
+                'filepath': file_path,
+                'size': file_info['size'],
+                'hash': hasher.hexdigest(),
+                'modified': file_info['modified'],
+                'created_at': datetime.now().isoformat()
+            }
+        except Exception as e:
+            print(f"计算哈希失败 {file_path}: {e}")
+            return None
     
-    elapsed = time.time() - start_time
-    print(f"磁盘 {disk} 完成！共处理 {processed} 个文件，计算哈希: {calculated} 个，跳过: {skipped} 个，耗时 {elapsed:.2f} 秒")
-    
-    return processed, calculated, skipped
-
-def populate_hash_table(db_path):
-    conn = sqlite3.connect(db_path, timeout=30.0, isolation_level='DEFERRED')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT COUNT(*) FROM duplicate')
-    total_files = cursor.fetchone()[0]
-    print(f"找到 {total_files} 个可能重复的文件")
-    
-    if total_files == 0:
-        conn.close()
-        return
-    
-    cursor.execute('SELECT Filepath, Size, Modified, Disk FROM duplicate')
-    files = cursor.fetchall()
-    
-    conn.close()
-    
-    print(f"排除的路径规则:")
-    for pattern in config.excluded_paths:
-        print(f"  {pattern}")
-    
-    disk_files = defaultdict(list)
-    excluded_count = 0
-    for file_path, size, modified, disk in files:
-        if is_path_excluded(file_path):
-            excluded_count += 1
-            continue
-        disk_files[disk].append((file_path, size, modified))
-    
-    print(f"按磁盘分组:")
-    for disk, disk_file_list in disk_files.items():
-        print(f"  {disk}: {len(disk_file_list)} 个文件")
-    
-    if excluded_count > 0:
-        print(f"已排除 {excluded_count} 个文件（匹配排除规则）")
-    
-    total_processed = 0
-    total_calculated = 0
-    total_skipped = 0
-    start_time = time.time()
-    
-    with ThreadPoolExecutor(max_workers=len(disk_files)) as executor:
-        future_to_disk = {
-            executor.submit(process_disk_files, db_path, disk, files): disk
-            for disk, files in disk_files.items()
-        }
+    def calculate_hash(self, mode='default'):
+        """计算哈希值
         
-        for future in as_completed(future_to_disk):
-            disk = future_to_disk[future]
-            try:
-                processed, calculated, skipped = future.result()
-                total_processed += processed
-                total_calculated += calculated
-                total_skipped += skipped
-            except Exception as e:
-                print(f"处理磁盘 {disk} 时出错: {e}")
+        Args:
+            mode: 计算模式
+                'default' - 默认模式：检查并更新
+                'new' - 仅新增模式：仅计算从未计算过hash值的文件
+                'force' - 强制更新模式：对duplicate_files表中所有文件重新计算哈希值
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        self.total_processed = 0
+        self.total_calculated = 0
+        self.total_skipped = 0
+        self.start_time = time.time()
+        
+        print(f"开始计算哈希值（模式: {mode})...")
+        
+        # 获取需要计算哈希的文件列表
+        if mode == 'new':
+            # 仅新增模式：只获取从未计算过哈希值的文件
+            cursor.execute('''
+            SELECT df.Filepath, f.Size, f.Modified
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE df.Filepath NOT IN (SELECT Filepath FROM file_hash)
+            ''')
+        elif mode == 'force':
+            # 强制更新模式：获取所有文件
+            cursor.execute('''
+            SELECT df.Filepath, f.Size, f.Modified
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            ''')
+        else:
+            # 默认模式：获取所有文件，后续判断是否需要重新计算
+            cursor.execute('''
+            SELECT df.Filepath, f.Size, f.Modified
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            ''')
+        
+        files = cursor.fetchall()
+        conn.close()
+        
+        # 批量计算哈希值
+        batch_size = 100
+        for i in range(0, len(files), batch_size):
+            batch = files[i:i+batch_size]
+            self.process_batch(batch, mode)
+        
+        elapsed = time.time() - self.start_time
+        speed = self.total_processed / elapsed if elapsed > 0 else 0
+        
+        print(f"\n哈希计算完成！")
+        print(f"总处理: {self.total_processed} 个文件")
+        print(f"计算哈希: {self.total_calculated} 个文件")
+        print(f"跳过: {self.total_skipped} 个文件")
+        print(f"耗时: {elapsed:.2f} 秒")
+        print(f"平均速度: {speed:.1f} 文件/秒")
     
-    elapsed = time.time() - start_time
-    print(f"\n所有磁盘处理完成！")
-    print(f"总处理: {total_processed} 个文件")
-    print(f"计算哈希: {total_calculated} 个文件")
-    print(f"跳过: {total_skipped} 个文件")
-    print(f"总耗时: {elapsed:.2f} 秒")
-    if elapsed > 0:
-        print(f"平均速度: {total_processed/elapsed:.1f} 文件/秒")
-
-def show_statistics(db_path):
-    conn = sqlite3.connect(db_path, timeout=30.0, isolation_level='DEFERRED')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT COUNT(*) FROM Hash')
-    total = cursor.fetchone()[0]
-    print(f"\nHash表统计:")
-    print(f"总记录数: {total}")
-    
-    cursor.execute('SELECT COUNT(DISTINCT Hash) FROM Hash WHERE Hash != ""')
-    unique_hashes = cursor.fetchone()[0]
-    print(f"唯一哈希值数: {unique_hashes}")
-    
-    cursor.execute('SELECT COUNT(*) FROM Hash WHERE Hash = ""')
-    zero_size_files = cursor.fetchone()[0]
-    print(f"零字节文件数: {zero_size_files}")
-    
-    cursor.execute('SELECT Hash, COUNT(*) as cnt FROM Hash WHERE Hash != "" GROUP BY Hash ORDER BY cnt DESC LIMIT 10')
-    print(f"\n重复最多的哈希值:")
-    for hash_val, count in cursor.fetchall():
-        print(f"  {hash_val}: {count} 个文件")
-    
-    conn.close()
+    def process_batch(self, batch, mode):
+        """处理一批文件的哈希计算"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 获取已计算的哈希值
+        file_paths = [file[0] for file in batch]
+        placeholders = ','.join(['?'] * len(file_paths))
+        cursor.execute(f'SELECT Filepath, Size, Modified FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
+        existing_hashes = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+        
+        # 计算哈希值
+        results = []
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_file = {
+                executor.submit(self.calculate_file_hash, file_path): file_path
+                for file_path, _, _ in batch
+            }
+            
+            for future in as_completed(future_to_file):
+                result = future.result()
+                if result:
+                    results.append(result)
+                    self.total_processed += 1
+                    
+                    if self.total_processed % 100 == 0:
+                        current_time = time.time()
+                        elapsed = current_time - self.start_time
+                        speed = self.total_processed / elapsed if elapsed > 0 else 0
+                        print(f"已处理: {self.total_processed} 个文件 ({speed:.1f} 文件/秒)")
+        
+        # 更新数据库
+        for result in results:
+            file_path = result['filepath']
+            actual_size = result['size']
+            actual_modified = result['modified']
+            hash_val = result['hash']
+            created_at = result['created_at']
+            
+            should_calculate = True
+            
+            if mode == 'default':
+                # 默认模式：检查是否需要重新计算
+                if file_path in existing_hashes:
+                    db_size, db_modified = existing_hashes[file_path]
+                    if actual_size == db_size and abs(actual_modified - db_modified) < 0.001:
+                        should_calculate = False
+                        self.total_skipped += 1
+                    else:
+                        print(f"文件变化 {file_path}: 大小或修改时间不一致")
+            
+            if should_calculate:
+                cursor.execute('''
+                INSERT OR REPLACE INTO file_hash (Filepath, Size, Hash, Modified, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ''', (file_path, actual_size, hash_val, actual_modified, created_at))
+                self.total_calculated += 1
+        
+        conn.commit()
+        conn.close()
 
 if __name__ == '__main__':
-    db_path = 'file_index.db'
+    import sys
     
-    print("开始计算文件哈希并填充Hash表...")
-    populate_hash_table(db_path)
+    calculator = HashCalculator()
     
-    print("\n显示统计信息...")
-    show_statistics(db_path)
+    if len(sys.argv) < 2:
+        print("用法: python hash_calculator.py <command> [args]")
+        print("\n可用命令:")
+        print("  calculate              - 计算哈希值（默认模式）")
+        print("  calculate --new       - 仅计算从未计算过hash值的文件")
+        print("  calculate --force     - 强制更新模式：对所有文件重新计算哈希值")
+        sys.exit(1)
+    
+    command = sys.argv[1]
+    
+    if command == 'calculate':
+        mode = 'default'
+        if '--new' in sys.argv:
+            mode = 'new'
+        elif '--force' in sys.argv:
+            mode = 'force'
+        
+        calculator.calculate_hash(mode)
+    else:
+        print(f"未知命令: {command}")
+        sys.exit(1)
