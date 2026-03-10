@@ -11,6 +11,8 @@ class HashCalculator:
         self.total_processed = 0
         self.total_calculated = 0
         self.total_skipped = 0
+        self.total_size_processed = 0
+        self.total_size_calculated = 0
         self.start_time = 0
     
     def get_connection(self):
@@ -70,9 +72,21 @@ class HashCalculator:
         self.total_processed = 0
         self.total_calculated = 0
         self.total_skipped = 0
+        self.total_size_processed = 0
+        self.total_size_calculated = 0
         self.start_time = time.time()
         
-        print(f"开始计算哈希值（模式: {mode})...")
+        # 显示模式说明
+        mode_desc = {
+            'default': '默认模式 - 检查并更新变化的文件',
+            'new': '仅新增模式 - 仅计算从未计算过hash值的文件',
+            'force': '强制更新模式 - 对所有文件重新计算哈希值'
+        }
+        
+        print("\n" + "=" * 80)
+        print("哈希值计算")
+        print("=" * 80)
+        print(f"模式: {mode_desc.get(mode, mode)}")
         
         # 获取需要计算哈希的文件列表
         if mode == 'new':
@@ -102,25 +116,69 @@ class HashCalculator:
         conn.close()
         
         total_files = len(files)
-        print(f"找到 {total_files} 个文件需要处理")
+        total_size = sum(file[1] for file in files)
+        
+        # 获取重复文件组信息
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
+        duplicate_groups = cursor.fetchone()[0]
+        conn.close()
+        
+        print(f"重复文件组数量: {duplicate_groups}")
+        print(f"待处理文件数量: {total_files} 个")
+        print(f"待处理文件总大小: {self.format_size(total_size)}")
+        print("=" * 80)
+        
+        if total_files == 0:
+            print("\n没有需要处理的文件")
+            return
+        
+        # 显示即将处理的文件列表（前20个）
+        print("\n即将计算哈希值的文件:")
+        print("-" * 80)
+        display_count = min(20, total_files)
+        for i, (filepath, size, _) in enumerate(files[:display_count], 1):
+            print(f"{i:3d}. {self.format_size(size):>10s}  {filepath}")
+        
+        if total_files > 20:
+            print(f"... 还有 {total_files - 20} 个文件")
+        print("-" * 80)
         
         # 批量计算哈希值
         batch_size = 100
         for i in range(0, len(files), batch_size):
             batch = files[i:i+batch_size]
-            self.process_batch(batch, mode, total_files)
+            self.process_batch(batch, mode, total_files, total_size)
         
         elapsed = time.time() - self.start_time
-        speed = self.total_processed / elapsed if elapsed > 0 else 0
         
-        print(f"\n哈希计算完成！")
-        print(f"总处理: {self.total_processed} 个文件")
-        print(f"计算哈希: {self.total_calculated} 个文件")
-        print(f"跳过: {self.total_skipped} 个文件")
+        # 显示完成信息
+        print("\n" + "=" * 80)
+        print("哈希计算完成！")
+        print("=" * 80)
+        print(f"总处理文件数: {self.total_processed} 个")
+        print(f"总处理大小: {self.format_size(self.total_size_processed)}")
+        print(f"计算哈希文件数: {self.total_calculated} 个")
+        print(f"计算哈希大小: {self.format_size(self.total_size_calculated)}")
+        print(f"跳过文件数: {self.total_skipped} 个")
         print(f"耗时: {elapsed:.2f} 秒")
-        print(f"平均速度: {speed:.1f} 文件/秒")
+        
+        if elapsed > 0:
+            speed_files = self.total_processed / elapsed
+            speed_size = self.total_size_processed / elapsed
+            print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
+        print("=" * 80)
     
-    def process_batch(self, batch, mode, total_files):
+    def format_size(self, size):
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+        return f"{size:.2f} PB"
+    
+    def process_batch(self, batch, mode, total_files, total_size):
         """处理一批文件的哈希计算"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -135,23 +193,29 @@ class HashCalculator:
         results = []
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_file = {
-                executor.submit(self.calculate_file_hash, file_path): file_path
-                for file_path, _, _ in batch
+                executor.submit(self.calculate_file_hash, file_path): (file_path, size)
+                for file_path, size, _ in batch
             }
             
             for future in as_completed(future_to_file):
+                file_path, file_size = future_to_file[future]
                 result = future.result()
                 if result:
                     results.append(result)
                     self.total_processed += 1
+                    self.total_size_processed += file_size
+                    
+                    # 显示每个文件的处理提示
+                    print(f"计算哈希: {self.format_size(file_size):>10s}  {file_path}")
                     
                     # 每10个文件或每批结束时显示进度
                     if self.total_processed % 10 == 0 or self.total_processed == total_files:
                         current_time = time.time()
                         elapsed = current_time - self.start_time
-                        speed = self.total_processed / elapsed if elapsed > 0 else 0
+                        speed_files = self.total_processed / elapsed if elapsed > 0 else 0
+                        speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
                         progress = (self.total_processed / total_files * 100) if total_files > 0 else 0
-                        print(f"进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed:.1f} 文件/秒")
+                        print(f"\n进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)\n")
         
         # 更新数据库
         for result in results:
@@ -179,6 +243,7 @@ class HashCalculator:
                 VALUES (?, ?, ?, ?, ?)
                 ''', (file_path, actual_size, hash_val, actual_modified, created_at))
                 self.total_calculated += 1
+                self.total_size_calculated += actual_size
         
         conn.commit()
         conn.close()
