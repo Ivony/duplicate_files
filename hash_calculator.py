@@ -5,6 +5,21 @@ import time
 from datetime import datetime
 
 class HashCalculator:
+    """
+    哈希值计算器
+    
+    重要说明：
+    本类中的所有哈希计算操作都是顺序执行的，绝对不要使用并行计算（多线程或多进程）。
+    
+    原因：
+    1. 哈希计算是磁盘IO密集型操作，不是CPU密集型操作
+    2. 并行计算会导致多个线程/进程同时读取磁盘，造成磁盘IO竞争
+    3. 磁盘IO竞争会导致磁头频繁寻道，大幅降低读取性能
+    4. 对于机械硬盘（HDD），并行读取会导致性能下降50%甚至更多
+    5. 即使是SSD，并行读取也不会带来明显的性能提升，反而可能降低性能
+    
+    因此，请保持顺序计算，一个文件一个文件地处理，这样才能获得最佳性能。
+    """
     def __init__(self, db_path='file_index.db'):
         self.db_path = db_path
         self.total_processed = 0
@@ -34,7 +49,12 @@ class HashCalculator:
             return None
     
     def calculate_file_hash(self, file_path):
-        """计算单个文件的哈希值"""
+        """
+        计算单个文件的哈希值
+        
+        注意：此方法是顺序执行的，不要尝试使用多线程或多进程来并行计算多个文件的哈希值。
+        哈希计算是磁盘IO密集型操作，并行计算会导致磁盘IO竞争，反而降低性能。
+        """
         try:
             file_info = self.get_file_info(file_path)
             if file_info is None:
@@ -141,7 +161,12 @@ class HashCalculator:
         print("=" * 80)
     
     def process_group(self, group_id, mode, total_files, total_size):
-        """处理一个重复文件组"""
+        """
+        处理一个重复文件组
+        
+        注意：此方法是顺序处理组内的所有文件，不使用并行计算。
+        原因是哈希计算是磁盘IO密集型操作，并行计算会导致性能下降。
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         
