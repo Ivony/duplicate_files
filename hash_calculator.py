@@ -27,6 +27,7 @@ class HashCalculator:
         self.total_skipped = 0
         self.total_size_processed = 0
         self.total_size_calculated = 0
+        self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
         self.start_time = 0
     
     def get_connection(self):
@@ -93,6 +94,7 @@ class HashCalculator:
         self.total_skipped = 0
         self.total_size_processed = 0
         self.total_size_calculated = 0
+        self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
         self.start_time = time.time()
         
         # 显示模式说明
@@ -218,6 +220,7 @@ class HashCalculator:
                     self.total_skipped += 1
                     self.total_processed += 1
                     self.total_size_processed += file_size
+                    # 注意：跳过的文件不计入速度计算
             
             elif mode == 'default':
                 # 默认模式：如果file_hash表里有该文件的记录，并且文件大小和修改时间都匹配，才跳过
@@ -253,33 +256,13 @@ class HashCalculator:
                     results.append(result)
                     self.total_processed += 1
                     self.total_size_processed += file_size
+                    self.total_size_for_speed += file_size  # 计入速度计算
                     
                     # 显示完成并换行
                     print("完成")
                 else:
                     print("失败")
                     continue
-            
-            # 显示进度
-            current_time = time.time()
-            elapsed = current_time - self.start_time
-            speed_files = self.total_processed / elapsed if elapsed > 0 else 0
-            speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
-            progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
-            
-            # 计算剩余时间
-            remaining_size = total_size - self.total_size_processed
-            remaining_time = remaining_size / speed_size if speed_size > 0 else 0
-            
-            # 格式化剩余时间
-            if remaining_time < 60:
-                time_str = f"{remaining_time:.0f} 秒"
-            elif remaining_time < 3600:
-                time_str = f"{remaining_time/60:.1f} 分钟"
-            else:
-                time_str = f"{remaining_time/3600:.1f} 小时"
-            
-            print(f"进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒 ({speed_files:.1f} 文件/秒)")
         
         # 更新数据库
         for result in results:
@@ -297,6 +280,26 @@ class HashCalculator:
             self.total_size_calculated += actual_size
         
         conn.commit()
+        
+        # 显示该组处理完成后的进度
+        current_time = time.time()
+        elapsed = current_time - self.start_time
+        speed_size = self.total_size_for_speed / elapsed if elapsed > 0 and self.total_size_for_speed > 0 else 0
+        progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
+        
+        # 计算剩余时间
+        remaining_size = total_size - self.total_size_processed
+        remaining_time = remaining_size / speed_size if speed_size > 0 else 0
+        
+        # 格式化剩余时间
+        if remaining_time < 60:
+            time_str = f"{remaining_time:.0f} 秒"
+        elif remaining_time < 3600:
+            time_str = f"{remaining_time/60:.1f} 分钟"
+        else:
+            time_str = f"{remaining_time/3600:.1f} 小时"
+        
+        print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒")
         
         # 分析该组的哈希值结果
         print(f"\n分析该组的哈希值结果...")
