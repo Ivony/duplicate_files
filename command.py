@@ -42,6 +42,7 @@ class CommandInterface:
         print(f"  index hash              - 计算所有可能重复文件的hash值")
         print(f"                              --new       仅新增模式：仅计算从未计算过hash值的文件")
         print(f"                              --force     强制更新模式：对duplicate_files表中所有文件重新计算哈希值")
+        print(f"  index clean             - 检查并清理索引文件（删除丢失文件、更新变更文件）")
         print(f"  index clean files       - 清除文件索引，删除files表中的所有数据")
         print(f"  index clean hash        - 清除哈希数据，删除file_hash表中的所有数据")
         print(f"  index clean full        - 清除所有数据，删除files表和file_hash表中的所有数据")
@@ -223,21 +224,22 @@ class CommandInterface:
             calculator.calculate_hash(mode)
             
         elif subcommand == 'clean':
-            if len(args) < 2:
-                print("错误: 请指定清理类型（files/hash/full）")
-                return
-            
-            clean_type = args[1]
             manager = IndexManager(self.db_path)
             
-            if clean_type == 'files':
-                manager.clean_files()
-            elif clean_type == 'hash':
-                manager.clean_hash()
-            elif clean_type == 'full':
-                manager.clean_full()
+            if len(args) < 2:
+                # 没有指定清理类型，执行索引清理
+                manager.clean_index()
             else:
-                print(f"错误: 未知的清理类型: {clean_type}")
+                clean_type = args[1]
+                
+                if clean_type == 'files':
+                    manager.clean_files()
+                elif clean_type == 'hash':
+                    manager.clean_hash()
+                elif clean_type == 'full':
+                    manager.clean_full()
+                else:
+                    print(f"错误: 未知的清理类型: {clean_type}")
             
         elif subcommand == 'rebuild':
             manager = IndexManager(self.db_path)
