@@ -101,11 +101,14 @@ class HashCalculator:
         files = cursor.fetchall()
         conn.close()
         
+        total_files = len(files)
+        print(f"找到 {total_files} 个文件需要处理")
+        
         # 批量计算哈希值
         batch_size = 100
         for i in range(0, len(files), batch_size):
             batch = files[i:i+batch_size]
-            self.process_batch(batch, mode)
+            self.process_batch(batch, mode, total_files)
         
         elapsed = time.time() - self.start_time
         speed = self.total_processed / elapsed if elapsed > 0 else 0
@@ -117,7 +120,7 @@ class HashCalculator:
         print(f"耗时: {elapsed:.2f} 秒")
         print(f"平均速度: {speed:.1f} 文件/秒")
     
-    def process_batch(self, batch, mode):
+    def process_batch(self, batch, mode, total_files):
         """处理一批文件的哈希计算"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -142,11 +145,13 @@ class HashCalculator:
                     results.append(result)
                     self.total_processed += 1
                     
-                    if self.total_processed % 100 == 0:
+                    # 每10个文件或每批结束时显示进度
+                    if self.total_processed % 10 == 0 or self.total_processed == total_files:
                         current_time = time.time()
                         elapsed = current_time - self.start_time
                         speed = self.total_processed / elapsed if elapsed > 0 else 0
-                        print(f"已处理: {self.total_processed} 个文件 ({speed:.1f} 文件/秒)")
+                        progress = (self.total_processed / total_files * 100) if total_files > 0 else 0
+                        print(f"进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed:.1f} 文件/秒")
         
         # 更新数据库
         for result in results:
