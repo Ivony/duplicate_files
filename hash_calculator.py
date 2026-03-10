@@ -223,6 +223,22 @@ class HashCalculator:
                 # 默认模式：如果file_hash表里有该文件的记录，并且文件大小和修改时间都匹配，才跳过
                 if file_path in existing_hashes:
                     db_size, db_modified = existing_hashes[file_path]
+                    
+                    # 确保修改时间是数值类型
+                    if isinstance(file_modified, str):
+                        try:
+                            dt = datetime.fromisoformat(file_modified)
+                            file_modified = dt.timestamp()
+                        except:
+                            file_modified = float(file_modified)
+                    
+                    if isinstance(db_modified, str):
+                        try:
+                            dt = datetime.fromisoformat(db_modified)
+                            db_modified = dt.timestamp()
+                        except:
+                            db_modified = float(db_modified)
+                    
                     if file_size == db_size and abs(file_modified - db_modified) < 0.001:
                         should_skip = True
                         print("跳过（文件未变化）")
