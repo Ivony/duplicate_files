@@ -3,7 +3,6 @@ import os
 import hashlib
 import time
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class HashCalculator:
     def __init__(self, db_path='file_index.db'):
@@ -134,17 +133,6 @@ class HashCalculator:
             print("\n没有需要处理的文件")
             return
         
-        # 显示即将处理的文件列表（前20个）
-        print("\n即将计算哈希值的文件:")
-        print("-" * 80)
-        display_count = min(20, total_files)
-        for i, (filepath, size, _) in enumerate(files[:display_count], 1):
-            print(f"{i:3d}. {self.format_size(size):>10s}  {filepath}")
-        
-        if total_files > 20:
-            print(f"... 还有 {total_files - 20} 个文件")
-        print("-" * 80)
-        
         # 批量计算哈希值
         batch_size = 100
         for i in range(0, len(files), batch_size):
@@ -191,31 +179,30 @@ class HashCalculator:
         
         # 计算哈希值
         results = []
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            future_to_file = {
-                executor.submit(self.calculate_file_hash, file_path): (file_path, size)
-                for file_path, size, _ in batch
-            }
+        for file_path, file_size, _ in batch:
+            # 显示即将处理的文件（不换行）
+            print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
             
-            for future in as_completed(future_to_file):
-                file_path, file_size = future_to_file[future]
-                result = future.result()
-                if result:
-                    results.append(result)
-                    self.total_processed += 1
-                    self.total_size_processed += file_size
-                    
-                    # 显示每个文件的处理提示
-                    print(f"计算哈希: {self.format_size(file_size):>10s}  {file_path}")
-                    
-                    # 每10个文件或每批结束时显示进度
-                    if self.total_processed % 10 == 0 or self.total_processed == total_files:
-                        current_time = time.time()
-                        elapsed = current_time - self.start_time
-                        speed_files = self.total_processed / elapsed if elapsed > 0 else 0
-                        speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
-                        progress = (self.total_processed / total_files * 100) if total_files > 0 else 0
-                        print(f"\n进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)\n")
+            # 计算哈希值
+            result = self.calculate_file_hash(file_path)
+            if result:
+                results.append(result)
+                self.total_processed += 1
+                self.total_size_processed += file_size
+                
+                # 显示完成并换行
+                print("完成")
+                
+                # 每10个文件或每批结束时显示进度
+                if self.total_processed % 10 == 0 or self.total_processed == total_files:
+                    current_time = time.time()
+                    elapsed = current_time - self.start_time
+                    speed_files = self.total_processed / elapsed if elapsed > 0 else 0
+                    speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
+                    progress = (self.total_processed / total_files * 100) if total_files > 0 else 0
+                    print(f"\n进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)\n")
+            else:
+                print("失败")
         
         # 更新数据库
         for result in results:
