@@ -199,8 +199,21 @@ class HashCalculator:
                     elapsed = current_time - self.start_time
                     speed_files = self.total_processed / elapsed if elapsed > 0 else 0
                     speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
-                    progress = (self.total_processed / total_files * 100) if total_files > 0 else 0
-                    print(f"\n进度: {self.total_processed}/{total_files} ({progress:.1f}%) - 速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)\n")
+                    progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
+                    
+                    # 计算剩余时间
+                    remaining_size = total_size - self.total_size_processed
+                    remaining_time = remaining_size / speed_size if speed_size > 0 else 0
+                    
+                    # 格式化剩余时间
+                    if remaining_time < 60:
+                        time_str = f"{remaining_time:.0f} 秒"
+                    elif remaining_time < 3600:
+                        time_str = f"{remaining_time/60:.1f} 分钟"
+                    else:
+                        time_str = f"{remaining_time/3600:.1f} 小时"
+                    
+                    print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒 ({speed_files:.1f} 文件/秒)\n")
             else:
                 print("失败")
         
