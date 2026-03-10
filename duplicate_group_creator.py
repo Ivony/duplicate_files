@@ -58,7 +58,7 @@ class DuplicateGroupCreator:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 首先，我们需要从Hash表中获取文件信息，并提取扩展名
+        # 首先，我们需要从Hash表中获取文件信息，并提取扩展名和磁盘信息
         # 创建临时表来存储文件信息和扩展名
         cursor.execute('''
         CREATE TEMP TABLE IF NOT EXISTS files_with_extension AS
@@ -67,7 +67,7 @@ class DuplicateGroupCreator:
             Size,
             Modified,
             SUBSTR(Filepath, INSTR(Filepath, '.') + 1) AS Extension,
-            Disk
+            SUBSTR(Filepath, 1, 1) AS Disk
         FROM Hash
         WHERE Size > 0
         ''')
