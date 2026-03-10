@@ -87,57 +87,39 @@ class HashCalculator:
         print("=" * 80)
         print(f"模式: {mode_desc.get(mode, mode)}")
         
-        # 获取需要计算哈希的文件列表
-        if mode == 'new':
-            # 仅新增模式：只获取从未计算过哈希值的文件
-            cursor.execute('''
-            SELECT df.Filepath, f.Size, f.Modified
-            FROM duplicate_files df
-            INNER JOIN files f ON df.Filepath = f.Filename
-            WHERE df.Filepath NOT IN (SELECT Filepath FROM file_hash)
-            ''')
-        elif mode == 'force':
-            # 强制更新模式：获取所有文件
-            cursor.execute('''
-            SELECT df.Filepath, f.Size, f.Modified
-            FROM duplicate_files df
-            INNER JOIN files f ON df.Filepath = f.Filename
-            ''')
-        else:
-            # 默认模式：获取所有文件，后续判断是否需要重新计算
-            cursor.execute('''
-            SELECT df.Filepath, f.Size, f.Modified
-            FROM duplicate_files df
-            INNER JOIN files f ON df.Filepath = f.Filename
-            ''')
-        
-        files = cursor.fetchall()
+        # 获取所有重复文件组
+        cursor.execute('''
+            SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            GROUP BY dg.ID
+            ORDER BY dg.Size DESC
+        ''')
+        groups = cursor.fetchall()
         conn.close()
         
-        total_files = len(files)
-        total_size = sum(file[1] for file in files)
+        total_groups = len(groups)
+        total_files = sum(group[3] for group in groups)
+        total_size = sum(group[2] * group[3] for group in groups)
         
-        # 获取重复文件组信息
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
-        duplicate_groups = cursor.fetchone()[0]
-        conn.close()
-        
-        print(f"重复文件组数量: {duplicate_groups}")
+        print(f"重复文件组数量: {total_groups}")
         print(f"待处理文件数量: {total_files} 个")
         print(f"待处理文件总大小: {self.format_size(total_size)}")
         print("=" * 80)
         
-        if total_files == 0:
+        if total_groups == 0:
             print("\n没有需要处理的文件")
             return
         
-        # 批量计算哈希值
-        batch_size = 100
-        for i in range(0, len(files), batch_size):
-            batch = files[i:i+batch_size]
-            self.process_batch(batch, mode, total_files, total_size)
+        # 按组处理
+        for group_idx, (group_id, extension, size, file_count) in enumerate(groups, 1):
+            print(f"\n{'=' * 80}")
+            print(f"处理第 {group_idx}/{total_groups} 组 (Group_ID: {group_id})")
+            print(f"扩展名: {extension}, 文件大小: {self.format_size(size)}, 文件数量: {file_count}")
+            print(f"{'=' * 80}")
+            
+            # 处理这个组
+            self.process_group(group_id, mode, total_files, total_size)
         
         elapsed = time.time() - self.start_time
         
@@ -158,64 +140,105 @@ class HashCalculator:
             print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
         print("=" * 80)
     
-    def format_size(self, size):
-        """格式化文件大小"""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size < 1024.0:
-                return f"{size:.2f} {unit}"
-            size /= 1024.0
-        return f"{size:.2f} PB"
-    
-    def process_batch(self, batch, mode, total_files, total_size):
-        """处理一批文件的哈希计算"""
+    def process_group(self, group_id, mode, total_files, total_size):
+        """处理一个重复文件组"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # 获取该组的所有文件
+        if mode == 'new':
+            # 仅新增模式：只获取从未计算过哈希值的文件
+            cursor.execute('''
+                SELECT df.Filepath, f.Size, f.Modified
+                FROM duplicate_files df
+                INNER JOIN files f ON df.Filepath = f.Filename
+                WHERE df.Group_ID = ? AND df.Filepath NOT IN (SELECT Filepath FROM file_hash)
+            ''', (group_id,))
+        else:
+            # 默认模式和强制更新模式：获取所有文件
+            cursor.execute('''
+                SELECT df.Filepath, f.Size, f.Modified
+                FROM duplicate_files df
+                INNER JOIN files f ON df.Filepath = f.Filename
+                WHERE df.Group_ID = ?
+            ''', (group_id,))
+        
+        files = cursor.fetchall()
+        
+        if not files:
+            conn.close()
+            print("该组没有需要处理的文件")
+            return
+        
         # 获取已计算的哈希值
-        file_paths = [file[0] for file in batch]
+        file_paths = [file[0] for file in files]
         placeholders = ','.join(['?'] * len(file_paths))
         cursor.execute(f'SELECT Filepath, Size, Modified FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
         existing_hashes = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
         
         # 计算哈希值
         results = []
-        for file_path, file_size, _ in batch:
+        for file_path, file_size, file_modified in files:
             # 显示即将处理的文件（不换行）
             print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
             
-            # 计算哈希值
-            result = self.calculate_file_hash(file_path)
-            if result:
-                results.append(result)
-                self.total_processed += 1
-                self.total_size_processed += file_size
-                
-                # 显示完成并换行
-                print("完成")
-                
-                # 每10个文件或每批结束时显示进度
-                if self.total_processed % 10 == 0 or self.total_processed == total_files:
-                    current_time = time.time()
-                    elapsed = current_time - self.start_time
-                    speed_files = self.total_processed / elapsed if elapsed > 0 else 0
-                    speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
-                    progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
+            # 检查是否需要跳过计算
+            should_skip = False
+            
+            if mode == 'new':
+                # 仅新增模式：如果file_hash表里有该文件的记录，就跳过
+                if file_path in existing_hashes:
+                    should_skip = True
+                    print("跳过（已有哈希记录）")
+                    self.total_skipped += 1
+                    self.total_processed += 1
+                    self.total_size_processed += file_size
+            
+            elif mode == 'default':
+                # 默认模式：如果file_hash表里有该文件的记录，并且文件大小和修改时间都匹配，才跳过
+                if file_path in existing_hashes:
+                    db_size, db_modified = existing_hashes[file_path]
+                    if file_size == db_size and abs(file_modified - db_modified) < 0.001:
+                        should_skip = True
+                        print("跳过（文件未变化）")
+                        self.total_skipped += 1
+                        self.total_processed += 1
+                        self.total_size_processed += file_size
+            
+            # 如果不需要跳过，计算哈希值
+            if not should_skip:
+                result = self.calculate_file_hash(file_path)
+                if result:
+                    results.append(result)
+                    self.total_processed += 1
+                    self.total_size_processed += file_size
                     
-                    # 计算剩余时间
-                    remaining_size = total_size - self.total_size_processed
-                    remaining_time = remaining_size / speed_size if speed_size > 0 else 0
-                    
-                    # 格式化剩余时间
-                    if remaining_time < 60:
-                        time_str = f"{remaining_time:.0f} 秒"
-                    elif remaining_time < 3600:
-                        time_str = f"{remaining_time/60:.1f} 分钟"
-                    else:
-                        time_str = f"{remaining_time/3600:.1f} 小时"
-                    
-                    print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒 ({speed_files:.1f} 文件/秒)\n")
+                    # 显示完成并换行
+                    print("完成")
+                else:
+                    print("失败")
+                    continue
+            
+            # 显示进度
+            current_time = time.time()
+            elapsed = current_time - self.start_time
+            speed_files = self.total_processed / elapsed if elapsed > 0 else 0
+            speed_size = self.total_size_processed / elapsed if elapsed > 0 else 0
+            progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
+            
+            # 计算剩余时间
+            remaining_size = total_size - self.total_size_processed
+            remaining_time = remaining_size / speed_size if speed_size > 0 else 0
+            
+            # 格式化剩余时间
+            if remaining_time < 60:
+                time_str = f"{remaining_time:.0f} 秒"
+            elif remaining_time < 3600:
+                time_str = f"{remaining_time/60:.1f} 分钟"
             else:
-                print("失败")
+                time_str = f"{remaining_time/3600:.1f} 小时"
+            
+            print(f"进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒 ({speed_files:.1f} 文件/秒)")
         
         # 更新数据库
         for result in results:
@@ -225,28 +248,60 @@ class HashCalculator:
             hash_val = result['hash']
             created_at = result['created_at']
             
-            should_calculate = True
-            
-            if mode == 'default':
-                # 默认模式：检查是否需要重新计算
-                if file_path in existing_hashes:
-                    db_size, db_modified = existing_hashes[file_path]
-                    if actual_size == db_size and abs(actual_modified - db_modified) < 0.001:
-                        should_calculate = False
-                        self.total_skipped += 1
-                    else:
-                        print(f"文件变化 {file_path}: 大小或修改时间不一致")
-            
-            if should_calculate:
-                cursor.execute('''
-                INSERT OR REPLACE INTO file_hash (Filepath, Size, Hash, Modified, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                ''', (file_path, actual_size, hash_val, actual_modified, created_at))
-                self.total_calculated += 1
-                self.total_size_calculated += actual_size
+            cursor.execute('''
+            INSERT OR REPLACE INTO file_hash (Filepath, Size, Hash, Modified, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (file_path, actual_size, hash_val, actual_modified, created_at))
+            self.total_calculated += 1
+            self.total_size_calculated += actual_size
         
         conn.commit()
+        
+        # 分析该组的哈希值结果
+        print(f"\n分析该组的哈希值结果...")
+        
+        # 获取该组所有文件的哈希值
+        cursor.execute('''
+            SELECT fh.Hash, df.Filepath
+            FROM duplicate_files df
+            INNER JOIN file_hash fh ON df.Filepath = fh.Filepath
+            WHERE df.Group_ID = ?
+        ''', (group_id,))
+        
+        hash_results = cursor.fetchall()
         conn.close()
+        
+        if hash_results:
+            # 按哈希值分组
+            hash_groups = {}
+            for hash_val, filepath in hash_results:
+                if hash_val not in hash_groups:
+                    hash_groups[hash_val] = []
+                hash_groups[hash_val].append(filepath)
+            
+            # 显示结果
+            if len(hash_groups) == 1:
+                hash_val = list(hash_groups.keys())[0]
+                print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
+                print(f"  哈希值: {hash_val}")
+                print(f"  文件数量: {len(hash_groups[hash_val])}")
+            elif len(hash_groups) == len(hash_results):
+                print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
+                print(f"  可以拆分为 {len(hash_groups)} 个独立的文件")
+            else:
+                print(f"⚡ 该组可以细分为 {len(hash_groups)} 个子组：")
+                for idx, (hash_val, filepaths) in enumerate(hash_groups.items(), 1):
+                    print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
+        else:
+            print("该组没有计算哈希值的文件")
+    
+    def format_size(self, size):
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+        return f"{size:.2f} PB"
 
 if __name__ == '__main__':
     import sys
