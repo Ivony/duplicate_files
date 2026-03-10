@@ -4,6 +4,7 @@ from duplicate_finder import DuplicateFinder
 from hash_calculator import populate_hash_table, show_statistics
 from database_manager import check_database
 from file_scanner import FileScanner
+from duplicate_group_creator import DuplicateGroupCreator
 
 class CommandInterface:
     def __init__(self, db_path):
@@ -18,6 +19,7 @@ class CommandInterface:
         print(f"  limit [PATH] - 限制检索范围到指定路径（如 C: 或 C:\\Users）")
         print(f"              不带参数时解除限制")
         print(f"  scan [PATH] - 扫描指定路径下的所有文件并建立索引")
+        print(f"  index     - 利用文件扩展名和大小创建重复文件组")
         print(f"  hash      - 计算文件哈希并填充Hash表")
         print(f"  hashstat  - 显示哈希表统计信息")
         print(f"  dbcheck   - 检查数据库结构和数据")
@@ -147,6 +149,10 @@ class CommandInterface:
                             print(f"错误：路径不存在或不是目录: {path}")
                     else:
                         print("错误：请指定要扫描的路径")
+                elif command == 'index':
+                    creator = DuplicateGroupCreator(self.db_path)
+                    creator.create_duplicate_groups()
+                    print("重复文件组创建完成！")
                 else:
                     print(f"未知命令: {command}，输入 help 查看帮助")
                     
