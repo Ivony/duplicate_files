@@ -55,15 +55,26 @@ class CommandInterface:
         print(f"  index status            - 索引状态，展示索引的文件、重复文件组数量等")
         print(f"  index list <path>       - 列举索引，显示指定路径下已经索引的文件和哈希值状态")
         
-        print(f"\nanalyze 指令:")
-        print(f"  analyze stat [--all]   - 显示重复文件统计信息")
-        print(f"                              --all 包括未确认哈希值的组")
-        print(f"  analyze top [N] [--all] - 显示最大的N个重复文件组（默认20个）")
-        print(f"                              --all 包括未确认哈希值的组")
-        print(f"  analyze details <hash>   - 查看特定哈希值的重复文件详情")
-        print(f"  analyze <pattern> [--all] - 按文件名或路径模式筛选重复文件")
-        print(f"                              支持通配符: *.mp4, E:\\Downloads\\*.mp4")
-        print(f"                              --all 包括未确认哈希值的组")
+        print(f"\nshow 指令:")
+        print(f"  show summary              - 显示数据汇总（文件总数、重复组数、可释放空间等）")
+        print(f"  show groups [options]     - 显示重复文件组列表")
+        print(f"    options:")
+        print(f"      --top N               - 显示最大的N个组（默认20）")
+        print(f"      --min-size <size>     - 只显示大于指定大小的组")
+        print(f"      --max-size <size>     - 只显示小于指定大小的组")
+        print(f"      --extension <ext>     - 只显示指定扩展名的组")
+        print(f"      --unconfirmed         - 包括未确认哈希值的组")
+        print(f"      --sort size|count|path - 排序方式（默认size）")
+        print(f"  show group <id>           - 显示指定组的详细信息")
+        print(f"  show files <pattern>      - 按模式搜索文件")
+        print(f"                              支持: *.mp4, E:\\Downloads\\*.mp4")
+        print(f"  show hash <hash>          - 显示指定哈希值的所有文件")
+        print(f"  show stats [options]      - 显示统计分析")
+        print(f"    options:")
+        print(f"      --by-extension        - 按扩展名统计")
+        print(f"      --by-size-range       - 按大小范围统计")
+        print(f"      --by-date             - 按日期统计")
+        print(f"  show path <path>          - 显示指定路径下的重复文件")
         
         print(f"\nexport 指令:")
         print(f"  export csv <path>      - 导出分析结果为CSV格式")
@@ -131,25 +142,36 @@ class CommandInterface:
                     'list': '列举索引'
                 }
             },
-            'analyze': {
-                'description': '分析指令',
-                'usage': 'analyze <子命令或筛选表达式> [选项]',
+            'show': {
+                'description': '显示数据指令',
+                'usage': 'show <子命令> [选项]',
                 'subcommands': {
-                    'stat [--all]': '显示重复文件统计信息（默认只统计已确认哈希值的组）',
-                    'top [N] [--all]': '显示最大的N个重复文件组（默认20个，默认只显示已确认哈希值的组）',
-                    'details <hash>': '查看特定哈希值的重复文件详情'
+                    'summary': '显示数据汇总（文件总数、重复组数、可释放空间等）',
+                    'groups [options]': '显示重复文件组列表',
+                    'group <id>': '显示指定组的详细信息',
+                    'files <pattern>': '按模式搜索文件',
+                    'hash <hash>': '显示指定哈希值的所有文件',
+                    'stats [options]': '显示统计分析',
+                    'path <path>': '显示指定路径下的重复文件'
                 },
-                'filter': {
-                    '<pattern> [--all]': '按文件名或路径模式筛选重复文件',
-                    '示例': [
-                        '*.mp4 - 筛选所有mp4文件',
-                        'E:\\ - 筛选E盘的所有文件',
-                        'E:\\Downloads\\*.mp4 - 筛选Downloads目录下的mp4文件'
-                    ]
+                'group_options': {
+                    '--top N': '显示最大的N个组（默认20）',
+                    '--min-size <size>': '只显示大于指定大小的组',
+                    '--max-size <size>': '只显示小于指定大小的组',
+                    '--extension <ext>': '只显示指定扩展名的组',
+                    '--unconfirmed': '包括未确认哈希值的组',
+                    '--sort size|count|path': '排序方式（默认size）'
                 },
-                'options': {
-                    '--all': '包括未确认哈希值的组（默认只显示已确认哈希值的组）'
-                }
+                'stats_options': {
+                    '--by-extension': '按扩展名统计',
+                    '--by-size-range': '按大小范围统计',
+                    '--by-date': '按日期统计'
+                },
+                'filter_examples': [
+                    '*.mp4 - 筛选所有mp4文件',
+                    'E:\\ - 筛选E盘的所有文件',
+                    'E:\\Downloads\\*.mp4 - 筛选Downloads目录下的mp4文件'
+                ]
             },
             'export': {
                 'description': '导出指令',
@@ -235,16 +257,25 @@ class CommandInterface:
                     print(f"  {strat:<25} - {desc}")
                 print()
             
-            # 显示筛选功能（analyze特有）
-            if 'filter' in info:
-                print("筛选功能:")
-                for key, desc in info['filter'].items():
-                    if key == '示例':
-                        print("  示例:")
-                        for example in desc:
-                            print(f"    {example}")
-                    else:
-                        print(f"  {key:<20} - {desc}")
+            # 显示group_options（show特有）
+            if 'group_options' in info:
+                print("groups选项:")
+                for opt, desc in info['group_options'].items():
+                    print(f"  {opt:<25} - {desc}")
+                print()
+            
+            # 显示stats_options（show特有）
+            if 'stats_options' in info:
+                print("stats选项:")
+                for opt, desc in info['stats_options'].items():
+                    print(f"  {opt:<25} - {desc}")
+                print()
+            
+            # 显示筛选示例（show特有）
+            if 'filter_examples' in info:
+                print("files筛选示例:")
+                for example in info['filter_examples']:
+                    print(f"  {example}")
                 print()
             
             print(f"=" * 60)
@@ -384,30 +415,20 @@ class CommandInterface:
             print(f"错误: 未知的index子命令: {subcommand}")
             self.show_command_help('index')
     
-    def execute_analyze_command(self, args):
-        """执行analyze命令"""
+    def execute_show_command(self, args):
+        """执行show命令"""
         if not args:
-            print("错误: 请指定analyze子命令或筛选表达式")
-            self.show_command_help('analyze')
+            print("错误: 请指定show子命令")
+            self.show_command_help('show')
             return
         
         subcommand = args[0]
         
-        if subcommand == 'stat':
-            hash_only = True  # 默认只显示已确认哈希值的组
+        if subcommand == 'summary':
+            # 显示数据汇总
+            stats = self.analyzer.get_statistics(hash_only=False)
             
-            # 解析参数
-            for arg in args[1:]:
-                if arg == '--all':
-                    hash_only = False
-            
-            stats = self.analyzer.get_statistics(hash_only)
-            
-            print(f"\n重复文件统计报告")
-            if hash_only:
-                print("(仅统计已确认哈希值的组)")
-            else:
-                print("(包括未确认哈希值的组)")
+            print(f"\n数据汇总报告")
             print(f"=" * 60)
             print(f"总文件数: {stats['total_files']:,}")
             print(f"重复文件组数: {stats['duplicate_groups']:,}")
@@ -419,59 +440,138 @@ class CommandInterface:
             print(f"\n如果删除重复文件:")
             print(f"  可以删除 {stats['duplicate_files'] - stats['duplicate_groups']} 个文件")
             print(f"  可以节省磁盘空间: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
-            
-            if hash_only and stats['unhashed_files'] > 0:
-                print(f"\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
-                print("      运行 'index hash' 可以计算未确认组的哈希值")
-            
             print(f"=" * 60)
             
-        elif subcommand == 'top':
+        elif subcommand == 'groups':
+            # 显示重复文件组列表
             count = 20
-            hash_only = True  # 默认只显示已确认哈希值的组
+            hash_only = True
+            min_size = None
+            max_size = None
+            extension = None
+            sort_by = 'size'
             
             # 解析参数
-            for arg in args[1:]:
-                if arg == '--all':
+            i = 1
+            while i < len(args):
+                arg = args[i]
+                if arg == '--top' and i + 1 < len(args):
+                    count = int(args[i + 1])
+                    i += 1
+                elif arg == '--unconfirmed':
                     hash_only = False
-                elif arg.isdigit():
-                    count = int(arg)
+                elif arg == '--min-size' and i + 1 < len(args):
+                    size_str = args[i + 1]
+                    min_size = self._parse_size(size_str)
+                    i += 1
+                elif arg == '--max-size' and i + 1 < len(args):
+                    size_str = args[i + 1]
+                    max_size = self._parse_size(size_str)
+                    i += 1
+                elif arg == '--extension' and i + 1 < len(args):
+                    extension = args[i + 1]
+                    i += 1
+                elif arg == '--sort' and i + 1 < len(args):
+                    sort_by = args[i + 1]
+                    i += 1
+                i += 1
             
-            top_groups = self.analyzer.get_top_groups(count, hash_only)
+            # 获取组列表
+            groups = self.analyzer.get_groups_list(
+                count=count,
+                hash_only=hash_only,
+                min_size=min_size,
+                max_size=max_size,
+                extension=extension,
+                sort_by=sort_by
+            )
             
-            if hash_only:
-                print(f"\n最大的{count}个已确认哈希值的重复文件组（按可释放空间排序）:")
-            else:
-                print(f"\n最大的{count}个重复文件组（按可释放空间排序，包括未确认哈希值的）:")
+            print(f"\n重复文件组列表")
             print(f"=" * 60)
             
-            if not top_groups:
+            if not groups:
                 print("  没有找到符合条件的重复文件组")
-                if hash_only:
-                    print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
-                    print("      运行 'index hash' 可以计算未确认组的哈希值")
             else:
-                for group in top_groups:
+                for group in groups:
                     print(f"\n组ID: {group['group_id']}")
                     print(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
                     print(f"  文件扩展名: {group['extension']}")
                     print(f"  文件数量: {group['file_count']} 个")
-                    print(f"  总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
                     print(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
                     if group['hash']:
                         print(f"  哈希值: {group['hash']}")
                     else:
                         print(f"  哈希值: 未确认")
-                    print(f"  包含的文件（前10个，按修改时间排序）:")
-                    for i, (disk, filepath) in enumerate(group['files'], 1):
-                        print(f"    {i}. [{disk}] {filepath}")
-                    
-                    if group['total_files'] > 10:
-                        print(f"    ... 还有 {group['total_files'] - 10} 个文件")
             
             print(f"=" * 60)
             
-        elif subcommand == 'details':
+        elif subcommand == 'group':
+            # 显示指定组的详细信息
+            if len(args) < 2:
+                print("错误: 请指定组ID")
+                return
+            
+            try:
+                group_id = int(args[1])
+            except ValueError:
+                print(f"错误: 无效的组ID: {args[1]}")
+                return
+            
+            group = self.analyzer.get_group_details(group_id)
+            
+            if not group:
+                print(f"错误: 找不到组ID: {group_id}")
+                return
+            
+            print(f"\n组 {group_id} 的详细信息")
+            print(f"=" * 60)
+            print(f"文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
+            print(f"文件扩展名: {group['extension']}")
+            print(f"文件数量: {group['file_count']} 个")
+            print(f"总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
+            print(f"可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+            if group['hash']:
+                print(f"哈希值: {group['hash']}")
+            else:
+                print(f"哈希值: 未确认")
+            print(f"\n包含的文件:")
+            for i, file_info in enumerate(group['files'], 1):
+                print(f"  {i}. {file_info['filepath']}")
+                print(f"     磁盘: {file_info['disk']}")
+                print(f"     修改时间: {file_info['modified']}")
+            print(f"=" * 60)
+            
+        elif subcommand == 'files':
+            # 按模式搜索文件
+            if len(args) < 2:
+                print("错误: 请指定搜索模式")
+                return
+            
+            pattern = args[1]
+            groups = self.analyzer.filter_by_pattern(pattern, hash_only=True)
+            
+            print(f"\n文件搜索结果（模式: {pattern}）")
+            print(f"=" * 60)
+            
+            if not groups:
+                print("  没有找到匹配的文件")
+            else:
+                print(f"  找到 {len(groups)} 个匹配的重复文件组")
+                for i, group in enumerate(groups, 1):
+                    print(f"\n{i}. 组ID: {group['group_id']}")
+                    print(f"   文件大小: {group['size']:,} 字节")
+                    print(f"   文件扩展名: {group['extension']}")
+                    print(f"   文件数量: {group['file_count']} 个")
+                    print(f"   匹配的文件:")
+                    for j, filepath in enumerate(group['matched_files'][:5], 1):
+                        print(f"     {j}. {filepath}")
+                    if len(group['matched_files']) > 5:
+                        print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+            
+            print(f"=" * 60)
+            
+        elif subcommand == 'hash':
+            # 显示指定哈希值的所有文件
             if len(args) < 2:
                 print("错误: 请指定哈希值")
                 return
@@ -493,49 +593,95 @@ class CommandInterface:
                     print(f"   计算时间: {file_info['created_at']}")
             print(f"=" * 60)
             
-        else:
-            # 将第一个参数视为筛选表达式
-            pattern = subcommand
-            hash_only = True  # 默认只显示已确认哈希值的组
+        elif subcommand == 'stats':
+            # 显示统计分析
+            by_extension = False
+            by_size_range = False
+            by_date = False
             
-            # 解析其他参数
             for arg in args[1:]:
-                if arg == '--all':
-                    hash_only = False
+                if arg == '--by-extension':
+                    by_extension = True
+                elif arg == '--by-size-range':
+                    by_size_range = True
+                elif arg == '--by-date':
+                    by_date = True
             
-            # 使用通配符筛选
-            groups = self.analyzer.filter_by_pattern(pattern, hash_only)
-            
-            if hash_only:
-                print(f"\n筛选结果（模式: {pattern}，已确认哈希值的组）:")
+            if by_extension:
+                stats = self.analyzer.get_stats_by_extension()
+                print(f"\n按扩展名统计")
+                print(f"=" * 60)
+                for ext, count in stats.items():
+                    print(f"  {ext or '(无扩展名)'}: {count} 个组")
+                print(f"=" * 60)
+            elif by_size_range:
+                stats = self.analyzer.get_stats_by_size_range()
+                print(f"\n按大小范围统计")
+                print(f"=" * 60)
+                for range_name, count in stats.items():
+                    print(f"  {range_name}: {count} 个组")
+                print(f"=" * 60)
+            elif by_date:
+                stats = self.analyzer.get_stats_by_date()
+                print(f"\n按日期统计")
+                print(f"=" * 60)
+                for date, count in stats.items():
+                    print(f"  {date}: {count} 个组")
+                print(f"=" * 60)
             else:
-                print(f"\n筛选结果（模式: {pattern}，包括未确认哈希值的组）:")
+                # 默认显示所有统计
+                print(f"\n统计分析")
+                print(f"=" * 60)
+                print("请指定统计方式:")
+                print("  --by-extension    按扩展名统计")
+                print("  --by-size-range   按大小范围统计")
+                print("  --by-date         按日期统计")
+                print(f"=" * 60)
+                
+        elif subcommand == 'path':
+            # 显示指定路径下的重复文件
+            if len(args) < 2:
+                print("错误: 请指定路径")
+                return
+            
+            path = args[1]
+            groups = self.analyzer.get_groups_by_path(path)
+            
+            print(f"\n路径 {path} 下的重复文件")
             print(f"=" * 60)
             
             if not groups:
-                print("  没有找到匹配的重复文件组")
-                if hash_only:
-                    print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
-                    print("      运行 'index hash' 可以计算未确认组的哈希值")
+                print("  没有找到重复文件")
             else:
-                print(f"  找到 {len(groups)} 个匹配的重复文件组")
+                print(f"  找到 {len(groups)} 个重复文件组")
                 for i, group in enumerate(groups, 1):
                     print(f"\n{i}. 组ID: {group['group_id']}")
                     print(f"   文件大小: {group['size']:,} 字节")
                     print(f"   文件扩展名: {group['extension']}")
                     print(f"   文件数量: {group['file_count']} 个")
-                    print(f"   可释放空间: {group['savable_space']:,} 字节")
-                    if group['hash']:
-                        print(f"   哈希值: {group['hash']}")
-                    else:
-                        print(f"   哈希值: 未确认")
-                    print(f"   匹配的文件:")
-                    for j, filepath in enumerate(group['matched_files'][:5], 1):
+                    print(f"   包含的文件:")
+                    for j, filepath in enumerate(group['files'][:5], 1):
                         print(f"     {j}. {filepath}")
-                    if len(group['matched_files']) > 5:
-                        print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+                    if len(group['files']) > 5:
+                        print(f"     ... 还有 {len(group['files']) - 5} 个文件")
             
             print(f"=" * 60)
+            
+        else:
+            print(f"错误: 未知的show子命令: {subcommand}")
+            self.show_command_help('show')
+    
+    def _parse_size(self, size_str):
+        """解析大小字符串（支持K/M/G单位）"""
+        size_str = size_str.upper()
+        if size_str.endswith('K'):
+            return int(size_str[:-1]) * 1024
+        elif size_str.endswith('M'):
+            return int(size_str[:-1]) * 1024 * 1024
+        elif size_str.endswith('G'):
+            return int(size_str[:-1]) * 1024 * 1024 * 1024
+        else:
+            return int(size_str)
     
     def execute_export_command(self, args):
         """执行export命令"""
@@ -758,8 +904,8 @@ class CommandInterface:
                     print("重构版本 - 支持新的指令系统和模块化架构")
                 elif main_command == 'index':
                     self.execute_index_command(args)
-                elif main_command == 'analyze':
-                    self.execute_analyze_command(args)
+                elif main_command == 'show':
+                    self.execute_show_command(args)
                 elif main_command == 'export':
                     self.execute_export_command(args)
                 elif main_command == 'config':

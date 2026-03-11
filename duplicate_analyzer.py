@@ -370,6 +370,273 @@ class DuplicateAnalyzer:
         conn.close()
         return result
 
+    def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size'):
+        """获取重复文件组列表
+        
+        Args:
+            count: 返回的组数量
+            hash_only: 是否只返回已确认哈希值的组
+            min_size: 最小文件大小（字节）
+            max_size: 最大文件大小（字节）
+            extension: 文件扩展名过滤
+            sort_by: 排序方式（size/count/path）
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 构建WHERE条件
+        conditions = []
+        params = []
+        
+        if hash_only:
+            conditions.append("dg.Hash IS NOT NULL AND dg.Hash != ''")
+        
+        if min_size is not None:
+            conditions.append("dg.Size >= ?")
+            params.append(min_size)
+        
+        if max_size is not None:
+            conditions.append("dg.Size <= ?")
+            params.append(max_size)
+        
+        if extension is not None:
+            conditions.append("dg.Extension = ?")
+            params.append(extension)
+        
+        if self.path_limit:
+            conditions.append("f.Filename LIKE ?")
+            params.append(f"{self.path_limit}%")
+        
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        
+        # 构建ORDER BY
+        if sort_by == 'size':
+            order_by = "ORDER BY (COUNT(*) - 1) * dg.Size DESC"
+        elif sort_by == 'count':
+            order_by = "ORDER BY COUNT(*) DESC"
+        elif sort_by == 'path':
+            order_by = "ORDER BY MIN(f.Filename)"
+        else:
+            order_by = "ORDER BY (COUNT(*) - 1) * dg.Size DESC"
+        
+        # 构建查询
+        if self.path_limit:
+            query = f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            INNER JOIN files f ON df.Filepath = f.Filename
+            {where_clause}
+            GROUP BY dg.ID
+            {order_by}
+            LIMIT ?
+            '''
+        else:
+            query = f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            {where_clause}
+            GROUP BY dg.ID
+            {order_by}
+            LIMIT ?
+            '''
+        
+        params.append(count)
+        cursor.execute(query, params)
+        groups = cursor.fetchall()
+        
+        result = []
+        for group_id, size, ext, file_count, hash_val in groups:
+            result.append({
+                'group_id': group_id,
+                'size': size,
+                'extension': ext,
+                'file_count': file_count,
+                'savable_space': (file_count - 1) * size,
+                'hash': hash_val
+            })
+        
+        conn.close()
+        return result
+
+    def get_group_details(self, group_id):
+        """获取指定组的详细信息
+        
+        Args:
+            group_id: 组ID
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 获取组基本信息
+        cursor.execute('''
+        SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+        FROM duplicate_groups dg
+        INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+        WHERE dg.ID = ?
+        GROUP BY dg.ID
+        ''', (group_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+        
+        group_id, size, extension, file_count, hash_val = row
+        
+        # 获取组内所有文件
+        cursor.execute('''
+        SELECT f.Filename, f.Modified, f.Size
+        FROM duplicate_files df
+        INNER JOIN files f ON df.Filepath = f.Filename
+        WHERE df.Group_ID = ?
+        ORDER BY f.Filename
+        ''', (group_id,))
+        
+        files = []
+        for filepath, modified, file_size in cursor.fetchall():
+            disk = os.path.splitdrive(filepath)[0].upper()
+            files.append({
+                'filepath': filepath,
+                'disk': disk,
+                'modified': modified,
+                'size': file_size
+            })
+        
+        conn.close()
+        
+        return {
+            'group_id': group_id,
+            'size': size,
+            'extension': extension,
+            'file_count': file_count,
+            'group_size': size * file_count,
+            'savable_space': (file_count - 1) * size,
+            'hash': hash_val,
+            'files': files
+        }
+
+    def get_stats_by_extension(self):
+        """按扩展名统计"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT Extension, COUNT(*) as count
+        FROM duplicate_groups
+        WHERE Hash IS NOT NULL AND Hash != ''
+        GROUP BY Extension
+        ORDER BY count DESC
+        ''')
+        
+        result = {}
+        for ext, count in cursor.fetchall():
+            result[ext or '(无扩展名)'] = count
+        
+        conn.close()
+        return result
+
+    def get_stats_by_size_range(self):
+        """按大小范围统计"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT 
+            CASE
+                WHEN Size < 1048576 THEN '< 1MB'
+                WHEN Size < 10485760 THEN '1MB - 10MB'
+                WHEN Size < 104857600 THEN '10MB - 100MB'
+                WHEN Size < 1073741824 THEN '100MB - 1GB'
+                ELSE '> 1GB'
+            END as size_range,
+            COUNT(*) as count
+        FROM duplicate_groups
+        WHERE Hash IS NOT NULL AND Hash != ''
+        GROUP BY size_range
+        ORDER BY MIN(Size)
+        ''')
+        
+        result = {}
+        for range_name, count in cursor.fetchall():
+            result[range_name] = count
+        
+        conn.close()
+        return result
+
+    def get_stats_by_date(self):
+        """按日期统计（基于文件修改时间）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT 
+            DATE(f.Modified) as date,
+            COUNT(DISTINCT dg.ID) as count
+        FROM duplicate_groups dg
+        INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+        INNER JOIN files f ON df.Filepath = f.Filename
+        WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        GROUP BY DATE(f.Modified)
+        ORDER BY date DESC
+        LIMIT 30
+        ''')
+        
+        result = {}
+        for date, count in cursor.fetchall():
+            result[date] = count
+        
+        conn.close()
+        return result
+
+    def get_groups_by_path(self, path):
+        """获取指定路径下的重复文件组
+        
+        Args:
+            path: 路径前缀
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+        FROM duplicate_groups dg
+        INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+        INNER JOIN files f ON df.Filepath = f.Filename
+        WHERE f.Filename LIKE ? AND dg.Hash IS NOT NULL AND dg.Hash != ''
+        GROUP BY dg.ID
+        ORDER BY (COUNT(*) - 1) * dg.Size DESC
+        ''', (f"{path}%",))
+        
+        groups = cursor.fetchall()
+        
+        result = []
+        for group_id, size, extension, file_count, hash_val in groups:
+            # 获取该组在指定路径下的文件
+            cursor.execute('''
+            SELECT f.Filename
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE df.Group_ID = ? AND f.Filename LIKE ?
+            ORDER BY f.Filename
+            ''', (group_id, f"{path}%"))
+            
+            files = [row[0] for row in cursor.fetchall()]
+            
+            result.append({
+                'group_id': group_id,
+                'size': size,
+                'extension': extension,
+                'file_count': file_count,
+                'savable_space': (file_count - 1) * size,
+                'hash': hash_val,
+                'files': files
+            })
+        
+        conn.close()
+        return result
+
 if __name__ == '__main__':
     import sys
     
@@ -378,19 +645,29 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("用法: python duplicate_analyzer.py <command> [args]")
         print("\n可用命令:")
-        print("  stat                  - 显示重复文件统计信息")
-        print("  top [N]              - 显示最大的N个重复文件组（默认20个）")
-        print("  details <hash>        - 查看特定哈希值的重复文件详情")
-        print("  filter <type> <value> - 按文件类型、大小等过滤重复文件")
-        print("                          type: extension/size/path")
-        print("  pattern <pattern>     - 按文件名或路径模式筛选重复文件")
+        print("  summary               - 显示数据汇总")
+        print("  groups [options]      - 显示重复文件组列表")
+        print("                          --top N              显示最大的N个组")
+        print("                          --min-size <size>    最小文件大小")
+        print("                          --max-size <size>    最大文件大小")
+        print("                          --extension <ext>    文件扩展名")
+        print("                          --unconfirmed        包括未确认哈希值的组")
+        print("                          --sort size|count|path 排序方式")
+        print("  group <id>            - 显示指定组的详细信息")
+        print("  files <pattern>       - 按模式搜索文件")
+        print("  hash <hash>           - 显示指定哈希值的所有文件")
+        print("  stats [options]       - 显示统计分析")
+        print("                          --by-extension       按扩展名统计")
+        print("                          --by-size-range      按大小范围统计")
+        print("                          --by-date            按日期统计")
+        print("  path <path>           - 显示指定路径下的重复文件")
         sys.exit(1)
     
     command = sys.argv[1]
     
-    if command == 'stat':
-        stats = analyzer.get_statistics()
-        print("\n重复文件统计报告")
+    if command == 'summary':
+        stats = analyzer.get_statistics(hash_only=False)
+        print("\n数据汇总报告")
         print("=" * 60)
         print(f"总文件数: {stats['total_files']}")
         print(f"重复文件组数: {stats['duplicate_groups']}")
@@ -404,36 +681,141 @@ if __name__ == '__main__':
         print(f"  可以节省磁盘空间: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
         print("=" * 60)
     
-    elif command == 'top':
+    elif command == 'groups':
+        # 解析参数
         count = 20
-        if len(sys.argv) > 2:
-            try:
-                count = int(sys.argv[2])
-            except ValueError:
-                print("错误: 请输入有效的数字")
-                sys.exit(1)
+        hash_only = True
+        min_size = None
+        max_size = None
+        extension = None
+        sort_by = 'size'
         
-        top_groups = analyzer.get_top_groups(count)
-        print(f"\n最大的{count}个重复文件组（按可释放空间排序）:")
+        i = 2
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == '--top' and i + 1 < len(sys.argv):
+                count = int(sys.argv[i + 1])
+                i += 1
+            elif arg == '--unconfirmed':
+                hash_only = False
+            elif arg == '--min-size' and i + 1 < len(sys.argv):
+                size_str = sys.argv[i + 1].upper()
+                if size_str.endswith('K'):
+                    min_size = int(size_str[:-1]) * 1024
+                elif size_str.endswith('M'):
+                    min_size = int(size_str[:-1]) * 1024 * 1024
+                elif size_str.endswith('G'):
+                    min_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                else:
+                    min_size = int(size_str)
+                i += 1
+            elif arg == '--max-size' and i + 1 < len(sys.argv):
+                size_str = sys.argv[i + 1].upper()
+                if size_str.endswith('K'):
+                    max_size = int(size_str[:-1]) * 1024
+                elif size_str.endswith('M'):
+                    max_size = int(size_str[:-1]) * 1024 * 1024
+                elif size_str.endswith('G'):
+                    max_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                else:
+                    max_size = int(size_str)
+                i += 1
+            elif arg == '--extension' and i + 1 < len(sys.argv):
+                extension = sys.argv[i + 1]
+                i += 1
+            elif arg == '--sort' and i + 1 < len(sys.argv):
+                sort_by = sys.argv[i + 1]
+                i += 1
+            i += 1
+        
+        groups = analyzer.get_groups_list(
+            count=count,
+            hash_only=hash_only,
+            min_size=min_size,
+            max_size=max_size,
+            extension=extension,
+            sort_by=sort_by
+        )
+        
+        print("\n重复文件组列表")
         print("=" * 60)
-        
-        for group in top_groups:
-            print(f"\n组ID: {group['group_id']}")
-            print(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
-            print(f"  文件扩展名: {group['extension']}")
-            print(f"  文件数量: {group['file_count']} 个")
-            print(f"  总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
-            print(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
-            print(f"  包含的文件（前10个，按修改时间排序）:")
-            for i, (disk, filepath) in enumerate(group['files'], 1):
-                print(f"    {i}. [{disk}] {filepath}")
-            
-            if group['total_files'] > 10:
-                print(f"    ... 还有 {group['total_files'] - 10} 个文件")
-        
+        if not groups:
+            print("  没有找到符合条件的重复文件组")
+        else:
+            for group in groups:
+                print(f"\n组ID: {group['group_id']}")
+                print(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
+                print(f"  文件扩展名: {group['extension']}")
+                print(f"  文件数量: {group['file_count']} 个")
+                print(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+                if group['hash']:
+                    print(f"  哈希值: {group['hash']}")
+                else:
+                    print(f"  哈希值: 未确认")
         print("=" * 60)
     
-    elif command == 'details':
+    elif command == 'group':
+        if len(sys.argv) < 3:
+            print("错误: 请指定组ID")
+            sys.exit(1)
+        
+        try:
+            group_id = int(sys.argv[2])
+        except ValueError:
+            print(f"错误: 无效的组ID: {sys.argv[2]}")
+            sys.exit(1)
+        
+        group = analyzer.get_group_details(group_id)
+        
+        if not group:
+            print(f"错误: 找不到组ID: {group_id}")
+            sys.exit(1)
+        
+        print(f"\n组 {group_id} 的详细信息")
+        print("=" * 60)
+        print(f"文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
+        print(f"文件扩展名: {group['extension']}")
+        print(f"文件数量: {group['file_count']} 个")
+        print(f"总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
+        print(f"可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+        if group['hash']:
+            print(f"哈希值: {group['hash']}")
+        else:
+            print(f"哈希值: 未确认")
+        print(f"\n包含的文件:")
+        for i, file_info in enumerate(group['files'], 1):
+            print(f"  {i}. {file_info['filepath']}")
+            print(f"     磁盘: {file_info['disk']}")
+            print(f"     修改时间: {file_info['modified']}")
+        print("=" * 60)
+    
+    elif command == 'files':
+        if len(sys.argv) < 3:
+            print("错误: 请指定搜索模式")
+            sys.exit(1)
+        
+        pattern = sys.argv[2]
+        groups = analyzer.filter_by_pattern(pattern, hash_only=True)
+        
+        print(f"\n文件搜索结果（模式: {pattern}）")
+        print("=" * 60)
+        if not groups:
+            print("  没有找到匹配的文件")
+        else:
+            print(f"  找到 {len(groups)} 个匹配的重复文件组")
+            for i, group in enumerate(groups, 1):
+                print(f"\n{i}. 组ID: {group['group_id']}")
+                print(f"   文件大小: {group['size']:,} 字节")
+                print(f"   文件扩展名: {group['extension']}")
+                print(f"   文件数量: {group['file_count']} 个")
+                print(f"   匹配的文件:")
+                for j, filepath in enumerate(group['matched_files'][:5], 1):
+                    print(f"     {j}. {filepath}")
+                if len(group['matched_files']) > 5:
+                    print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+        print("=" * 60)
+    
+    elif command == 'hash':
         if len(sys.argv) < 3:
             print("错误: 请指定哈希值")
             sys.exit(1)
@@ -455,76 +837,73 @@ if __name__ == '__main__':
                 print(f"   计算时间: {file_info['created_at']}")
         print("=" * 60)
     
-    elif command == 'filter':
-        if len(sys.argv) < 4:
-            print("错误: 请指定过滤类型和值")
-            print("用法: python duplicate_analyzer.py filter <type> <value>")
-            print("  type: extension/size/path")
-            sys.exit(1)
+    elif command == 'stats':
+        by_extension = False
+        by_size_range = False
+        by_date = False
         
-        filter_type = sys.argv[2]
-        value = sys.argv[3]
+        for arg in sys.argv[2:]:
+            if arg == '--by-extension':
+                by_extension = True
+            elif arg == '--by-size-range':
+                by_size_range = True
+            elif arg == '--by-date':
+                by_date = True
         
-        groups = analyzer.filter_duplicates(filter_type, value)
-        
-        print(f"\n过滤结果（{filter_type} = {value}):")
-        print("=" * 60)
-        if not groups:
-            print("  没有找到匹配的重复文件组")
+        if by_extension:
+            stats = analyzer.get_stats_by_extension()
+            print("\n按扩展名统计")
+            print("=" * 60)
+            for ext, count in stats.items():
+                print(f"  {ext}: {count} 个组")
+            print("=" * 60)
+        elif by_size_range:
+            stats = analyzer.get_stats_by_size_range()
+            print("\n按大小范围统计")
+            print("=" * 60)
+            for range_name, count in stats.items():
+                print(f"  {range_name}: {count} 个组")
+            print("=" * 60)
+        elif by_date:
+            stats = analyzer.get_stats_by_date()
+            print("\n按日期统计")
+            print("=" * 60)
+            for date, count in stats.items():
+                print(f"  {date}: {count} 个组")
+            print("=" * 60)
         else:
-            for i, group in enumerate(groups, 1):
-                print(f"\n{i}. 组ID: {group['group_id']}")
-                print(f"   文件大小: {group['size']:,} 字节")
-                print(f"   文件扩展名: {group['extension']}")
-                print(f"   文件数量: {group['file_count']} 个")
-                print(f"   可释放空间: {group['savable_space']:,} 字节")
-        print("=" * 60)
+            print("\n统计分析")
+            print("=" * 60)
+            print("请指定统计方式:")
+            print("  --by-extension    按扩展名统计")
+            print("  --by-size-range   按大小范围统计")
+            print("  --by-date         按日期统计")
+            print("=" * 60)
     
-    elif command == 'pattern':
+    elif command == 'path':
         if len(sys.argv) < 3:
-            print("错误: 请指定筛选模式")
-            print("用法: python duplicate_analyzer.py pattern <pattern>")
-            print("  支持通配符: *.mp4, E:\\Downloads\\*.mp4")
+            print("错误: 请指定路径")
             sys.exit(1)
         
-        pattern = sys.argv[2]
-        hash_only = True
+        path = sys.argv[2]
+        groups = analyzer.get_groups_by_path(path)
         
-        # 解析参数
-        for arg in sys.argv[3:]:
-            if arg == '--all':
-                hash_only = False
-        
-        groups = analyzer.filter_by_pattern(pattern, hash_only)
-        
-        if hash_only:
-            print(f"\n筛选结果（模式: {pattern}，已确认哈希值的组）:")
-        else:
-            print(f"\n筛选结果（模式: {pattern}，包括未确认哈希值的组）:")
+        print(f"\n路径 {path} 下的重复文件")
         print("=" * 60)
-        
         if not groups:
-            print("  没有找到匹配的重复文件组")
-            if hash_only:
-                print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
-                print("      运行 'index hash' 可以计算未确认组的哈希值")
+            print("  没有找到重复文件")
         else:
-            print(f"  找到 {len(groups)} 个匹配的重复文件组")
+            print(f"  找到 {len(groups)} 个重复文件组")
             for i, group in enumerate(groups, 1):
                 print(f"\n{i}. 组ID: {group['group_id']}")
                 print(f"   文件大小: {group['size']:,} 字节")
                 print(f"   文件扩展名: {group['extension']}")
                 print(f"   文件数量: {group['file_count']} 个")
-                print(f"   可释放空间: {group['savable_space']:,} 字节")
-                if group['hash']:
-                    print(f"   哈希值: {group['hash']}")
-                else:
-                    print(f"   哈希值: 未确认")
-                print(f"   匹配的文件:")
-                for j, filepath in enumerate(group['matched_files'][:5], 1):
+                print(f"   包含的文件:")
+                for j, filepath in enumerate(group['files'][:5], 1):
                     print(f"     {j}. {filepath}")
-                if len(group['matched_files']) > 5:
-                    print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+                if len(group['files']) > 5:
+                    print(f"     ... 还有 {len(group['files']) - 5} 个文件")
         print("=" * 60)
     
     else:
