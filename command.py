@@ -43,6 +43,7 @@ class CommandInterface:
         print(f"                              group_id: 指定组ID，可以是单个或多个（逗号分隔）")
         print(f"                              --new       仅新增模式：仅计算从未计算过hash值的文件")
         print(f"                              --force     强制更新模式：对所有文件重新计算哈希值")
+        print(f"                              --verify    验证模式：验证组的哈希值是否与所有文件一致")
         print(f"                              --extension <ext>  只计算指定扩展名的组")
         print(f"                              --size <op><size> 按文件大小过滤组（如>1000000）")
         print(f"                              --unconfirmed  只计算未确认哈希值的组")
