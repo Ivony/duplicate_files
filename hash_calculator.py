@@ -538,6 +538,7 @@ if __name__ == '__main__':
         print("  calculate              - 计算哈希值（默认模式）")
         print("  calculate --new       - 仅计算从未计算过hash值的文件")
         print("  calculate --force     - 强制更新模式：对所有文件重新计算哈希值")
+        print("  calculate --verify    - 验证模式：验证组的哈希值是否与所有文件一致")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -548,6 +549,8 @@ if __name__ == '__main__':
             mode = 'new'
         elif '--force' in sys.argv:
             mode = 'force'
+        elif '--verify' in sys.argv:
+            mode = 'verify'
         
         calculator.calculate_hash(mode)
     else:

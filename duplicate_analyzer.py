@@ -383,6 +383,7 @@ if __name__ == '__main__':
         print("  details <hash>        - 查看特定哈希值的重复文件详情")
         print("  filter <type> <value> - 按文件类型、大小等过滤重复文件")
         print("                          type: extension/size/path")
+        print("  pattern <pattern>     - 按文件名或路径模式筛选重复文件")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -477,6 +478,53 @@ if __name__ == '__main__':
                 print(f"   文件扩展名: {group['extension']}")
                 print(f"   文件数量: {group['file_count']} 个")
                 print(f"   可释放空间: {group['savable_space']:,} 字节")
+        print("=" * 60)
+    
+    elif command == 'pattern':
+        if len(sys.argv) < 3:
+            print("错误: 请指定筛选模式")
+            print("用法: python duplicate_analyzer.py pattern <pattern>")
+            print("  支持通配符: *.mp4, E:\\Downloads\\*.mp4")
+            sys.exit(1)
+        
+        pattern = sys.argv[2]
+        hash_only = True
+        
+        # 解析参数
+        for arg in sys.argv[3:]:
+            if arg == '--all':
+                hash_only = False
+        
+        groups = analyzer.filter_by_pattern(pattern, hash_only)
+        
+        if hash_only:
+            print(f"\n筛选结果（模式: {pattern}，已确认哈希值的组）:")
+        else:
+            print(f"\n筛选结果（模式: {pattern}，包括未确认哈希值的组）:")
+        print("=" * 60)
+        
+        if not groups:
+            print("  没有找到匹配的重复文件组")
+            if hash_only:
+                print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
+                print("      运行 'index hash' 可以计算未确认组的哈希值")
+        else:
+            print(f"  找到 {len(groups)} 个匹配的重复文件组")
+            for i, group in enumerate(groups, 1):
+                print(f"\n{i}. 组ID: {group['group_id']}")
+                print(f"   文件大小: {group['size']:,} 字节")
+                print(f"   文件扩展名: {group['extension']}")
+                print(f"   文件数量: {group['file_count']} 个")
+                print(f"   可释放空间: {group['savable_space']:,} 字节")
+                if group['hash']:
+                    print(f"   哈希值: {group['hash']}")
+                else:
+                    print(f"   哈希值: 未确认")
+                print(f"   匹配的文件:")
+                for j, filepath in enumerate(group['matched_files'][:5], 1):
+                    print(f"     {j}. {filepath}")
+                if len(group['matched_files']) > 5:
+                    print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
         print("=" * 60)
     
     else:
