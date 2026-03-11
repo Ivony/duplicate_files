@@ -88,6 +88,9 @@ class CommandInterface:
         print(f"  clean [选项] [排序策略]  - 清理重复文件")
         print(f"    选项:")
         print(f"      --dryrun            - 模拟执行，不实际删除文件")
+        print(f"      --script [path]     - 生成删除脚本，不实际删除文件")
+        print(f"                            path: 脚本文件路径（可选，根据扩展名自动判断类型）")
+        print(f"                            支持: .cmd/.bat (CMD), .sh/.bash (Bash), .ps1 (PowerShell)")
         print(f"      --yes, -y           - 自动确认，不询问")
         print(f"      --group <ids>       - 只清理指定的组ID（多个ID用逗号分隔）")
         print(f"      --min-size <size>   - 只清理大于指定大小的文件组（支持K/M/G单位）")
@@ -178,6 +181,7 @@ class CommandInterface:
                 'usage': 'clean [选项] [排序策略]',
                 'options': {
                     '--dryrun': '模拟执行，不实际删除文件',
+                    '--script [path]': '生成删除脚本，不实际删除文件（支持.cmd/.sh/.ps1）',
                     '--yes, -y': '自动确认，不询问',
                     '--group <ids>': '只清理指定的组ID（多个ID用逗号分隔）',
                     '--min-size <size>': '只清理大于指定大小的文件组（支持K/M/G单位）',
@@ -649,6 +653,12 @@ class CommandInterface:
             
             if arg == '--dryrun':
                 cleaner.dryrun = True
+            elif arg == '--script':
+                cleaner.script_mode = True
+                # 检查是否有路径参数（下一个参数不以--开头）
+                if i + 1 < len(remaining_args) and not remaining_args[i + 1].startswith('--'):
+                    cleaner.script_path = remaining_args[i + 1]
+                    i += 1  # 跳过路径参数
             elif arg == '--yes' or arg == '-y':
                 cleaner.auto_confirm = True
             elif arg == '--group' and i + 1 < len(remaining_args):
