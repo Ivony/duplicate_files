@@ -10,21 +10,38 @@ class DuplicateAnalyzer:
         """获取数据库连接"""
         return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
     
-    def get_statistics(self):
-        """获取统计信息"""
+    def get_statistics(self, hash_only=True):
+        """获取统计信息
+        
+        Args:
+            hash_only: 是否只统计已确认哈希值的组（Hash字段不为空）
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
+        
+        # 构建基础查询条件
+        hash_condition = "WHERE dg.Hash IS NOT NULL AND dg.Hash != ''" if hash_only else ""
         
         # 获取files表中的文件数量
         cursor.execute('SELECT COUNT(*) FROM files')
         total_files = cursor.fetchone()[0]
         
         # 获取duplicate_groups表中的组数量
-        cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
+        if hash_only:
+            cursor.execute("SELECT COUNT(*) FROM duplicate_groups WHERE Hash IS NOT NULL AND Hash != ''")
+        else:
+            cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
         duplicate_groups = cursor.fetchone()[0]
         
-        # 获取duplicate_files表中的文件数量
-        cursor.execute('SELECT COUNT(*) FROM duplicate_files')
+        # 获取duplicate_files表中的文件数量（只统计已确认哈希值的组中的文件）
+        if hash_only:
+            cursor.execute('''
+                SELECT COUNT(*) FROM duplicate_files df
+                INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+                WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+            ''')
+        else:
+            cursor.execute('SELECT COUNT(*) FROM duplicate_files')
         duplicate_files = cursor.fetchone()[0]
         
         # 获取file_hash表中的文件数量
@@ -40,15 +57,28 @@ class DuplicateAnalyzer:
         total_size = cursor.fetchone()[0] or 0
         
         # 计算重复文件总大小
-        cursor.execute('''
-        SELECT SUM(duplicate_size)
-        FROM (
-            SELECT (COUNT(*) - 1) * f.Size as duplicate_size
-            FROM duplicate_files df
-            INNER JOIN files f ON df.Filepath = f.Filename
-            GROUP BY df.Group_ID
-        )
-        ''')
+        if hash_only:
+            cursor.execute('''
+            SELECT SUM(duplicate_size)
+            FROM (
+                SELECT (COUNT(*) - 1) * f.Size as duplicate_size
+                FROM duplicate_files df
+                INNER JOIN files f ON df.Filepath = f.Filename
+                INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+                WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+                GROUP BY df.Group_ID
+            )
+            ''')
+        else:
+            cursor.execute('''
+            SELECT SUM(duplicate_size)
+            FROM (
+                SELECT (COUNT(*) - 1) * f.Size as duplicate_size
+                FROM duplicate_files df
+                INNER JOIN files f ON df.Filepath = f.Filename
+                GROUP BY df.Group_ID
+            )
+            ''')
         duplicate_size = cursor.fetchone()[0] or 0
         
         conn.close()
@@ -266,6 +296,78 @@ class DuplicateAnalyzer:
                 'hash': hash_val
             })
         
+        return result
+    
+    def filter_by_pattern(self, pattern, hash_only=True):
+        """使用通配符模式筛选重复文件组
+        
+        Args:
+            pattern: 筛选表达式，支持通配符如 *.mp4, E:\\Downloads\\*.mp4
+            hash_only: 是否只返回已确认哈希值的组（Hash字段不为空）
+        """
+        import fnmatch
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 构建基础查询条件
+        hash_condition = "WHERE dg.Hash IS NOT NULL AND dg.Hash != ''" if hash_only else "WHERE 1=1"
+        
+        # 获取所有符合条件的组（需要关联duplicate_files表来统计文件数量）
+        cursor.execute(f'''
+        SELECT dg.ID, dg.Size, dg.Extension, COUNT(df.Filepath) as file_count, dg.Hash
+        FROM duplicate_groups dg
+        INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+        {hash_condition}
+        GROUP BY dg.ID
+        HAVING COUNT(df.Filepath) > 1
+        ORDER BY (COUNT(df.Filepath) - 1) * dg.Size DESC
+        ''')
+        
+        groups = cursor.fetchall()
+        
+        # 规范化模式：统一使用正斜杠进行匹配，并转为小写
+        normalized_pattern = pattern.replace('\\', '/').lower()
+        
+        result = []
+        for group_id, size, extension, file_count, hash_val in groups:
+            # 获取该组的所有文件路径
+            cursor.execute('''
+            SELECT f.Filename
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE df.Group_ID = ?
+            ''', (group_id,))
+            
+            files = cursor.fetchall()
+            file_paths = [f[0] for f in files]
+            
+            # 检查是否有文件匹配模式
+            matched_files = []
+            for filepath in file_paths:
+                # 规范化文件路径（转为小写）
+                normalized_path = filepath.replace('\\', '/').lower()
+                filename = os.path.basename(normalized_path)
+                
+                # 检查文件名是否匹配（如果是纯文件名模式如 *.mp4）
+                # 或者完整路径是否匹配（如果是路径模式如 E:/Downloads/*.mp4）
+                if fnmatch.fnmatch(filename, normalized_pattern) or fnmatch.fnmatch(normalized_path, normalized_pattern):
+                    matched_files.append(filepath)
+            
+            # 如果该组有文件匹配，则添加到结果
+            if matched_files:
+                result.append({
+                    'group_id': group_id,
+                    'size': size,
+                    'extension': extension,
+                    'file_count': file_count,
+                    'group_size': size * file_count,
+                    'savable_space': (file_count - 1) * size,
+                    'hash': hash_val,
+                    'matched_files': matched_files
+                })
+        
+        conn.close()
         return result
 
 if __name__ == '__main__':
