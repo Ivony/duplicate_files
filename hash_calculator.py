@@ -77,7 +77,7 @@ class HashCalculator:
             print(f"计算哈希失败 {file_path}: {e}")
             return None
     
-    def calculate_hash(self, mode='default'):
+    def calculate_hash(self, mode='default', group_ids=None, filters=None):
         """计算哈希值
         
         Args:
@@ -85,6 +85,8 @@ class HashCalculator:
                 'default' - 默认模式：检查并更新
                 'new' - 仅新增模式：仅计算从未计算过hash值的文件
                 'force' - 强制更新模式：对duplicate_files表中所有文件重新计算哈希值
+            group_ids: 指定的组ID列表，如果为None则根据filters选择组或选择所有组
+            filters: 过滤器字典，如 {'extension': '.mp4', 'size': '>1000000', 'unconfirmed': True}
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -109,14 +111,80 @@ class HashCalculator:
         print("=" * 80)
         print(f"模式: {mode_desc.get(mode, mode)}")
         
-        # 获取所有重复文件组
-        cursor.execute('''
-            SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
-            FROM duplicate_groups dg
-            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-            GROUP BY dg.ID
-            ORDER BY dg.Size DESC
-        ''')
+        # 获取要处理的重复文件组
+        if group_ids:
+            # 指定了组ID，只处理这些组
+            placeholders = ','.join(['?'] * len(group_ids))
+            cursor.execute(f'''
+                SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                WHERE dg.ID IN ({placeholders})
+                GROUP BY dg.ID
+                ORDER BY dg.Size DESC
+            ''', group_ids)
+            print(f"指定组ID: {', '.join(map(str, group_ids))}")
+        elif filters:
+            # 根据过滤器选择组
+            where_conditions = []
+            params = []
+            
+            if 'extension' in filters:
+                where_conditions.append('dg.Extension = ?')
+                params.append(filters['extension'])
+            
+            if 'size' in filters:
+                size_filter = filters['size']
+                if size_filter.startswith('>') or size_filter.startswith('<'):
+                    operator = size_filter[0]
+                    size_value = int(size_filter[1:])
+                    where_conditions.append(f'dg.Size {operator} ?')
+                    params.append(size_value)
+                else:
+                    where_conditions.append('dg.Size = ?')
+                    params.append(int(size_filter))
+            
+            if 'unconfirmed' in filters and filters['unconfirmed']:
+                where_conditions.append('(dg.Hash IS NULL OR dg.Hash = "")')
+            
+            if where_conditions:
+                where_clause = ' AND '.join(where_conditions)
+                cursor.execute(f'''
+                    SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
+                    FROM duplicate_groups dg
+                    INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                    WHERE {where_clause}
+                    GROUP BY dg.ID
+                    ORDER BY dg.Size DESC
+                ''', params)
+                
+                filter_desc = []
+                if 'extension' in filters:
+                    filter_desc.append(f"扩展名: {filters['extension']}")
+                if 'size' in filters:
+                    filter_desc.append(f"大小: {filters['size']}")
+                if 'unconfirmed' in filters and filters['unconfirmed']:
+                    filter_desc.append("未确认哈希值")
+                print(f"过滤条件: {', '.join(filter_desc)}")
+            else:
+                # 没有过滤器，获取所有组
+                cursor.execute('''
+                    SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
+                    FROM duplicate_groups dg
+                    INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                    GROUP BY dg.ID
+                    ORDER BY dg.Size DESC
+                ''')
+        else:
+            # 没有指定组ID和过滤器，获取所有组
+            cursor.execute('''
+                SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                GROUP BY dg.ID
+                ORDER BY dg.Size DESC
+            ''')
+        
         groups = cursor.fetchall()
         conn.close()
         

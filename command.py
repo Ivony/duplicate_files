@@ -39,9 +39,13 @@ class CommandInterface:
         print(f"  index full <path>       - 执行完整扫描流程：扫描 → 索引 → 哈希计算")
         print(f"  index import <csv>       - 从CSV文件导入文件列表")
         print(f"                              --encoding <编码>  指定CSV文件的字符编码（默认utf-8）")
-        print(f"  index hash              - 计算所有可能重复文件的hash值")
+        print(f"  index hash [group_id]   - 计算指定组或所有组的hash值")
+        print(f"                              group_id: 指定组ID，可以是单个或多个（逗号分隔）")
         print(f"                              --new       仅新增模式：仅计算从未计算过hash值的文件")
-        print(f"                              --force     强制更新模式：对duplicate_files表中所有文件重新计算哈希值")
+        print(f"                              --force     强制更新模式：对所有文件重新计算哈希值")
+        print(f"                              --extension <ext>  只计算指定扩展名的组")
+        print(f"                              --size <op><size> 按文件大小过滤组（如>1000000）")
+        print(f"                              --unconfirmed  只计算未确认哈希值的组")
         print(f"  index clean             - 检查并清理索引文件（删除丢失文件、更新变更文件）")
         print(f"  index clean files       - 清除文件索引，删除files表中的所有数据")
         print(f"  index clean hash        - 清除哈希数据，删除file_hash表中的所有数据")
@@ -217,13 +221,39 @@ class CommandInterface:
             
         elif subcommand == 'hash':
             mode = 'default'
-            if '--new' in args:
-                mode = 'new'
-            elif '--force' in args:
-                mode = 'force'
+            group_ids = None
+            filters = {}
+            
+            # 解析参数
+            remaining_args = args[1:]
+            i = 0
+            while i < len(remaining_args):
+                arg = remaining_args[i]
+                
+                if arg == '--new':
+                    mode = 'new'
+                elif arg == '--force':
+                    mode = 'force'
+                elif arg == '--unconfirmed':
+                    filters['unconfirmed'] = True
+                elif arg == '--extension' and i + 1 < len(remaining_args):
+                    filters['extension'] = remaining_args[i + 1]
+                    i += 1  # 跳过参数值
+                elif arg == '--size' and i + 1 < len(remaining_args):
+                    filters['size'] = remaining_args[i + 1]
+                    i += 1  # 跳过参数值
+                elif arg.isdigit() or ',' in arg:
+                    # 组ID（单个或多个）
+                    try:
+                        group_ids = [int(gid) for gid in arg.split(',')]
+                    except ValueError:
+                        print(f"错误: 无效的组ID: {arg}")
+                        return
+                
+                i += 1
             
             calculator = HashCalculator(self.db_path)
-            calculator.calculate_hash(mode)
+            calculator.calculate_hash(mode, group_ids, filters)
             
         elif subcommand == 'clean':
             manager = IndexManager(self.db_path)
