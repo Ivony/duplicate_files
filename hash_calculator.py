@@ -511,7 +511,9 @@ class HashCalculator:
                     row = cursor.fetchone()
                     size, extension = row if row else (0, '')
                     
-                    # 先删除原组（级联删除会自动删除duplicate_files中的关联记录）
+                    # 先删除duplicate_files中的关联记录
+                    cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
+                    # 再删除原组
                     cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
                     
                     # 为每个子组创建新的组

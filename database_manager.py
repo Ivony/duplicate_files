@@ -87,7 +87,7 @@ class DatabaseManager:
         CREATE TABLE IF NOT EXISTS duplicate_files (
             Filepath TEXT PRIMARY KEY,
             Group_ID INTEGER,
-            FOREIGN KEY (Group_ID) REFERENCES duplicate_groups(ID)
+            FOREIGN KEY (Group_ID) REFERENCES duplicate_groups(ID) ON DELETE CASCADE
         )
         ''')
         
