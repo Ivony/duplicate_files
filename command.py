@@ -926,11 +926,48 @@ class CommandInterface:
 def main():
     db_path = 'file_index.db'
     
-    if len(sys.argv) > 1:
-        db_path = sys.argv[1]
+    # 检查是否指定了数据库路径（--db 参数）
+    args = sys.argv[1:]
+    if '--db' in args:
+        db_index = args.index('--db')
+        if db_index + 1 < len(args):
+            db_path = args[db_index + 1]
+            args = args[:db_index] + args[db_index + 2:]
     
     interface = CommandInterface(db_path)
-    interface.run()
+    
+    # 如果有命令行参数，直接执行命令
+    if args:
+        command = ' '.join(args)
+        parts = command.split()
+        if parts:
+            main_command = parts[0].lower()
+            cmd_args = parts[1:]
+            
+            if main_command == 'help' or main_command == 'h' or main_command == '?':
+                if cmd_args:
+                    interface.show_command_help(cmd_args[0])
+                else:
+                    interface.show_help()
+            elif main_command == 'version':
+                print("重复文件分析工具 v2.0")
+                print("重构版本 - 支持新的指令系统和模块化架构")
+            elif main_command == 'index':
+                interface.execute_index_command(cmd_args)
+            elif main_command == 'show':
+                interface.execute_show_command(cmd_args)
+            elif main_command == 'export':
+                interface.execute_export_command(cmd_args)
+            elif main_command == 'config':
+                interface.execute_config_command(cmd_args)
+            elif main_command == 'db':
+                interface.execute_db_command(cmd_args)
+            elif main_command == 'clean':
+                interface.execute_clean_command(cmd_args)
+            else:
+                print(f"未知命令: {main_command}，输入 help 查看帮助")
+    else:
+        interface.run()
 
 if __name__ == '__main__':
     main()
