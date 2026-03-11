@@ -7,6 +7,10 @@ class FileCleaner:
     def __init__(self, db_path='file_index.db'):
         self.db_path = db_path
         self.dryrun = False
+        self.script_mode = False
+        self.script_path = None
+        self.script_file = None
+        self.script_type = None  # 'cmd', 'bash', 'powershell'
         self.auto_confirm = False
         self.sort_strategy = 'newest'  # 默认策略
         self.group_ids = None
@@ -18,9 +22,14 @@ class FileCleaner:
         return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
     
     def delete_file(self, filepath):
-        """删除文件，支持模拟模式"""
+        """删除文件，支持模拟模式和脚本模式"""
         if self.dryrun:
             print(f"    [模拟] 删除文件: {filepath}")
+            return True
+        
+        if self.script_mode:
+            # 脚本模式：将删除命令写入脚本文件
+            self._write_delete_command(filepath)
             return True
         
         try:
@@ -34,6 +43,111 @@ class FileCleaner:
         except Exception as e:
             print(f"    错误: 删除文件失败 {filepath}: {e}")
             return False
+    
+    def init_script_file(self, script_path=None):
+        """初始化脚本文件"""
+        # 确定脚本路径
+        if script_path:
+            self.script_path = script_path
+        else:
+            # 默认路径
+            self.script_path = self._get_default_script_path()
+        
+        # 检查文件是否存在
+        if os.path.exists(self.script_path):
+            print(f"\n脚本文件已存在: {self.script_path}")
+            choice = input("是否覆盖? (y/n): ").strip().lower()
+            if choice != 'y':
+                print("取消脚本生成")
+                return False
+        
+        # 确定脚本类型
+        self.script_type = self._detect_script_type(self.script_path)
+        
+        # 创建脚本文件并写入头部
+        self.script_file = open(self.script_path, 'w', encoding='utf-8')
+        self._write_script_header()
+        
+        print(f"脚本文件: {self.script_path}")
+        print(f"脚本类型: {self.script_type}")
+        return True
+    
+    def _get_default_script_path(self):
+        """获取默认脚本路径"""
+        # 根据操作系统选择默认脚本类型
+        if os.name == 'nt':  # Windows
+            return 'clean_duplicate.cmd'
+        else:
+            return 'clean_duplicate.sh'
+    
+    def _detect_script_type(self, script_path):
+        """根据文件扩展名检测脚本类型"""
+        ext = os.path.splitext(script_path)[1].lower()
+        if ext in ['.cmd', '.bat']:
+            return 'cmd'
+        elif ext in ['.sh', '.bash']:
+            return 'bash'
+        elif ext in ['.ps1']:
+            return 'powershell'
+        else:
+            # 根据操作系统默认
+            return 'cmd' if os.name == 'nt' else 'bash'
+    
+    def _write_script_header(self):
+        """写入脚本头部"""
+        if self.script_type == 'cmd':
+            self.script_file.write('@echo off\n')
+            self.script_file.write('REM 自动生成的重复文件清理脚本\n')
+            self.script_file.write(f'REM 生成时间: {datetime.now().isoformat()}\n')
+            self.script_file.write('REM 请仔细审查后再执行此脚本\n\n')
+        elif self.script_type == 'bash':
+            self.script_file.write('#!/bin/bash\n')
+            self.script_file.write('# 自动生成的重复文件清理脚本\n')
+            self.script_file.write(f'# 生成时间: {datetime.now().isoformat()}\n')
+            self.script_file.write('# 请仔细审查后再执行此脚本\n\n')
+        elif self.script_type == 'powershell':
+            self.script_file.write('# 自动生成的重复文件清理脚本\n')
+            self.script_file.write(f'# 生成时间: {datetime.now().isoformat()}\n')
+            self.script_file.write('# 请仔细审查后再执行此脚本\n\n')
+    
+    def _write_delete_command(self, filepath):
+        """写入删除命令到脚本"""
+        # 转义特殊字符
+        escaped_path = filepath.replace('"', '\\"')
+        
+        if self.script_type == 'cmd':
+            # CMD: 使用 if exist 检查文件是否存在
+            self.script_file.write(f'if exist "{escaped_path}" (\n')
+            self.script_file.write(f'    echo 删除: {escaped_path}\n')
+            self.script_file.write(f'    del /f "{escaped_path}"\n')
+            self.script_file.write(f') else (\n')
+            self.script_file.write(f'    echo 文件不存在: {escaped_path}\n')
+            self.script_file.write(f')\n\n')
+        elif self.script_type == 'bash':
+            # Bash: 使用 [ -f ] 检查文件是否存在
+            escaped_path = filepath.replace('"', '\\"').replace('$', '\\$')
+            self.script_file.write(f'if [ -f "{escaped_path}" ]; then\n')
+            self.script_file.write(f'    echo "删除: {escaped_path}"\n')
+            self.script_file.write(f'    rm -f "{escaped_path}"\n')
+            self.script_file.write(f'else\n')
+            self.script_file.write(f'    echo "文件不存在: {escaped_path}"\n')
+            self.script_file.write(f'fi\n\n')
+        elif self.script_type == 'powershell':
+            # PowerShell: 使用 Test-Path 检查文件是否存在
+            self.script_file.write(f'if (Test-Path "{escaped_path}") {{\n')
+            self.script_file.write(f'    Write-Host "删除: {escaped_path}"\n')
+            self.script_file.write(f'    Remove-Item -Force "{escaped_path}"\n')
+            self.script_file.write(f'}} else {{\n')
+            self.script_file.write(f'    Write-Host "文件不存在: {escaped_path}"\n')
+            self.script_file.write(f'}}\n\n')
+    
+    def close_script_file(self):
+        """关闭脚本文件"""
+        if self.script_file:
+            self.script_file.close()
+            self.script_file = None
+            print(f"\n脚本已生成: {self.script_path}")
+            print(f"请仔细审查脚本内容后再执行")
     
     def verify_group(self, group_id):
         """验证文件组的哈希值一致性"""
@@ -110,6 +224,12 @@ class FileCleaner:
         print(f"排序策略: {self.get_strategy_name()}")
         if self.dryrun:
             print("模式: 模拟执行 (不实际删除文件)")
+        elif self.script_mode:
+            print("模式: 脚本生成 (生成删除脚本)")
+            # 初始化脚本文件
+            if not self.init_script_file(self.script_path):
+                conn.close()
+                return
         
         # 构建查询语句
         query = '''
@@ -244,6 +364,10 @@ class FileCleaner:
         
         conn.close()
         
+        # 关闭脚本文件
+        if self.script_mode:
+            self.close_script_file()
+        
         print("\n" + "=" * 80)
         print(f"清理完成！")
         print(f"总计:")
@@ -255,6 +379,8 @@ class FileCleaner:
         
         if self.dryrun:
             print("\n注意：这是模拟操作，没有实际删除任何文件")
+        elif self.script_mode:
+            print(f"\n注意：已生成删除脚本，请审查后再执行: {self.script_path}")
         
         print("=" * 80)
     
@@ -285,6 +411,18 @@ if __name__ == '__main__':
         cleaner.dryrun = '--dryrun' in sys.argv
         cleaner.auto_confirm = '--yes' in sys.argv
         
+        # 解析--script参数
+        if '--script' in sys.argv:
+            cleaner.script_mode = True
+            # 查找--script后面的路径参数
+            try:
+                script_idx = sys.argv.index('--script')
+                # 检查是否有路径参数（下一个参数不以--开头）
+                if script_idx + 1 < len(sys.argv) and not sys.argv[script_idx + 1].startswith('--'):
+                    cleaner.script_path = sys.argv[script_idx + 1]
+            except ValueError:
+                pass
+        
         # 解析排序策略
         strategies = ['newest', 'oldest', 'longest_name', 'shortest_name', 
                      'longest_path', 'shortest_path', 'first_alpha_name', 
@@ -301,8 +439,11 @@ if __name__ == '__main__':
     else:
         print("用法: python file_cleaner.py [选项] [排序策略]")
         print("\n选项:")
-        print("  --dryrun    模拟执行，不实际删除文件")
-        print("  --yes       自动确认，不询问")
+        print("  --dryrun                模拟执行，不实际删除文件")
+        print("  --script [path]         生成删除脚本，不实际删除文件")
+        print("                          path: 脚本文件路径（可选，根据扩展名自动判断类型）")
+        print("                          支持: .cmd/.bat (CMD), .sh/.bash (Bash), .ps1 (PowerShell)")
+        print("  --yes                   自动确认，不询问")
         print("\n排序策略:")
         print("  --keep-newest           保留最新文件 (默认)")
         print("  --keep-oldest           保留最旧文件")
