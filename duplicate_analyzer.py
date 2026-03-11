@@ -63,36 +63,66 @@ class DuplicateAnalyzer:
             'duplicate_size': duplicate_size
         }
     
-    def get_top_groups(self, count=20):
-        """获取最大的重复文件组"""
+    def get_top_groups(self, count=20, hash_only=True):
+        """获取最大的重复文件组
+        
+        Args:
+            count: 返回的组数量
+            hash_only: 是否只返回已确认哈希值的组（Hash字段不为空）
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        if self.path_limit:
-            cursor.execute('''
-            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
-            FROM duplicate_groups dg
-            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-            INNER JOIN files f ON df.Filepath = f.Filename
-            WHERE f.Filename LIKE ?
-            GROUP BY dg.ID
-            ORDER BY (COUNT(*) - 1) * dg.Size DESC
-            LIMIT ?
-            ''', (f"{self.path_limit}%", count))
+        if hash_only:
+            # 只返回已确认哈希值的组
+            if self.path_limit:
+                cursor.execute('''
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                INNER JOIN files f ON df.Filepath = f.Filename
+                WHERE f.Filename LIKE ? AND dg.Hash IS NOT NULL AND dg.Hash != ''
+                GROUP BY dg.ID
+                ORDER BY (COUNT(*) - 1) * dg.Size DESC
+                LIMIT ?
+                ''', (f"{self.path_limit}%", count))
+            else:
+                cursor.execute('''
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+                GROUP BY dg.ID
+                ORDER BY (COUNT(*) - 1) * dg.Size DESC
+                LIMIT ?
+                ''', (count,))
         else:
-            cursor.execute('''
-            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
-            FROM duplicate_groups dg
-            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-            GROUP BY dg.ID
-            ORDER BY (COUNT(*) - 1) * dg.Size DESC
-            LIMIT ?
-            ''', (count,))
+            # 返回所有组（包括未确认哈希值的）
+            if self.path_limit:
+                cursor.execute('''
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                INNER JOIN files f ON df.Filepath = f.Filename
+                WHERE f.Filename LIKE ?
+                GROUP BY dg.ID
+                ORDER BY (COUNT(*) - 1) * dg.Size DESC
+                LIMIT ?
+                ''', (f"{self.path_limit}%", count))
+            else:
+                cursor.execute('''
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+                FROM duplicate_groups dg
+                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+                GROUP BY dg.ID
+                ORDER BY (COUNT(*) - 1) * dg.Size DESC
+                LIMIT ?
+                ''', (count,))
         
         groups = cursor.fetchall()
         
         top_groups = []
-        for group_id, size, extension, file_count in groups:
+        for group_id, size, extension, file_count, hash_val in groups:
             # 获取该组的文件列表
             if self.path_limit:
                 cursor.execute('''
@@ -126,7 +156,8 @@ class DuplicateAnalyzer:
                 'group_size': size * file_count,
                 'savable_space': (file_count - 1) * size,
                 'files': disk_files,
-                'total_files': len(files)
+                'total_files': len(files),
+                'hash': hash_val
             })
         
         conn.close()
@@ -166,21 +197,25 @@ class DuplicateAnalyzer:
         
         return result
     
-    def filter_duplicates(self, filter_type, value):
+    def filter_duplicates(self, filter_type, value, hash_only=True):
         """过滤重复文件
         
         Args:
             filter_type: 过滤类型（extension/size/path）
             value: 过滤值
+            hash_only: 是否只返回已确认哈希值的组（Hash字段不为空）
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # 构建基础查询条件
+        hash_condition = "AND dg.Hash IS NOT NULL AND dg.Hash != ''" if hash_only else ""
+        
         if filter_type == 'extension':
-            cursor.execute('''
-            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
+            cursor.execute(f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
             FROM duplicate_groups dg
-            WHERE dg.Extension = ?
+            WHERE dg.Extension = ? {hash_condition}
             ORDER BY (COUNT(*) - 1) * dg.Size DESC
             ''', (value,))
         elif filter_type == 'size':
@@ -189,25 +224,25 @@ class DuplicateAnalyzer:
                 operator = value[0]
                 size_value = int(value[1:])
                 cursor.execute(f'''
-                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
                 FROM duplicate_groups dg
-                WHERE dg.Size {operator} ?
+                WHERE dg.Size {operator} ? {hash_condition}
                 ORDER BY (COUNT(*) - 1) * dg.Size DESC
                 ''', (size_value,))
             else:
-                cursor.execute('''
-                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
+                cursor.execute(f'''
+                SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
                 FROM duplicate_groups dg
-                WHERE dg.Size = ?
+                WHERE dg.Size = ? {hash_condition}
                 ORDER BY (COUNT(*) - 1) * dg.Size DESC
                 ''', (int(value),))
         elif filter_type == 'path':
-            cursor.execute('''
-            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count
+            cursor.execute(f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
             FROM duplicate_groups dg
             INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
             INNER JOIN files f ON df.Filepath = f.Filename
-            WHERE f.Filename LIKE ?
+            WHERE f.Filename LIKE ? {hash_condition}
             GROUP BY dg.ID
             ORDER BY (COUNT(*) - 1) * dg.Size DESC
             ''', (f"{value}%",))
@@ -220,14 +255,15 @@ class DuplicateAnalyzer:
         conn.close()
         
         result = []
-        for group_id, size, extension, file_count in groups:
+        for group_id, size, extension, file_count, hash_val in groups:
             result.append({
                 'group_id': group_id,
                 'size': size,
                 'extension': extension,
                 'file_count': file_count,
                 'group_size': size * file_count,
-                'savable_space': (file_count - 1) * size
+                'savable_space': (file_count - 1) * size,
+                'hash': hash_val
             })
         
         return result

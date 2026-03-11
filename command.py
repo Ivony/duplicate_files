@@ -52,9 +52,11 @@ class CommandInterface:
         
         print(f"\nanalyze 指令:")
         print(f"  analyze stat           - 显示重复文件统计信息")
-        print(f"  analyze top [N]        - 显示最大的N个重复文件组（默认20个）")
+        print(f"  analyze top [N] [--all] - 显示最大的N个重复文件组（默认20个）")
+        print(f"                              --all 显示所有组（包括未确认哈希值的）")
         print(f"  analyze details <hash>   - 查看特定哈希值的重复文件详情")
-        print(f"  analyze filter <type> <value> - 按文件类型、大小等过滤重复文件")
+        print(f"  analyze filter <type> <value> [--all] - 按文件类型、大小等过滤重复文件")
+        print(f"                              --all 显示所有组（包括未确认哈希值的）")
         
         print(f"\nexport 指令:")
         print(f"  export csv <path>      - 导出分析结果为CSV格式")
@@ -290,30 +292,46 @@ class CommandInterface:
             
         elif subcommand == 'top':
             count = 20
-            if len(args) > 1:
-                try:
-                    count = int(args[1])
-                except ValueError:
-                    print("错误: 请输入有效的数字")
-                    return
+            hash_only = True  # 默认只显示已确认哈希值的组
             
-            top_groups = self.analyzer.get_top_groups(count)
-            print(f"\n最大的{count}个重复文件组（按可释放空间排序）:")
+            # 解析参数
+            for arg in args[1:]:
+                if arg == '--all':
+                    hash_only = False
+                elif arg.isdigit():
+                    count = int(arg)
+            
+            top_groups = self.analyzer.get_top_groups(count, hash_only)
+            
+            if hash_only:
+                print(f"\n最大的{count}个已确认哈希值的重复文件组（按可释放空间排序）:")
+            else:
+                print(f"\n最大的{count}个重复文件组（按可释放空间排序，包括未确认哈希值的）:")
             print(f"=" * 60)
             
-            for group in top_groups:
-                print(f"\n组ID: {group['group_id']}")
-                print(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
-                print(f"  文件扩展名: {group['extension']}")
-                print(f"  文件数量: {group['file_count']} 个")
-                print(f"  总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
-                print(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
-                print(f"  包含的文件（前10个，按修改时间排序）:")
-                for i, (disk, filepath) in enumerate(group['files'], 1):
-                    print(f"    {i}. [{disk}] {filepath}")
-                
-                if group['total_files'] > 10:
-                    print(f"    ... 还有 {group['total_files'] - 10} 个文件")
+            if not top_groups:
+                print("  没有找到符合条件的重复文件组")
+                if hash_only:
+                    print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
+                    print("      运行 'index hash' 可以计算未确认组的哈希值")
+            else:
+                for group in top_groups:
+                    print(f"\n组ID: {group['group_id']}")
+                    print(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
+                    print(f"  文件扩展名: {group['extension']}")
+                    print(f"  文件数量: {group['file_count']} 个")
+                    print(f"  总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
+                    print(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+                    if group['hash']:
+                        print(f"  哈希值: {group['hash']}")
+                    else:
+                        print(f"  哈希值: 未确认")
+                    print(f"  包含的文件（前10个，按修改时间排序）:")
+                    for i, (disk, filepath) in enumerate(group['files'], 1):
+                        print(f"    {i}. [{disk}] {filepath}")
+                    
+                    if group['total_files'] > 10:
+                        print(f"    ... 还有 {group['total_files'] - 10} 个文件")
             
             print(f"=" * 60)
             
@@ -342,19 +360,27 @@ class CommandInterface:
         elif subcommand == 'filter':
             if len(args) < 3:
                 print("错误: 请指定过滤类型和值")
-                print("用法: analyze filter <type> <value>")
+                print("用法: analyze filter <type> <value> [--all]")
                 print("  type: extension/size/path")
+                print("  --all: 显示所有组（包括未确认哈希值的）")
                 return
             
             filter_type = args[1]
             value = args[2]
+            hash_only = '--all' not in args  # 默认只显示已确认哈希值的组
             
-            groups = self.analyzer.filter_duplicates(filter_type, value)
+            groups = self.analyzer.filter_duplicates(filter_type, value, hash_only)
             
-            print(f"\n过滤结果（{filter_type} = {value}):")
+            if hash_only:
+                print(f"\n过滤结果（{filter_type} = {value}，已确认哈希值的组）:")
+            else:
+                print(f"\n过滤结果（{filter_type} = {value}，包括未确认哈希值的组）:")
             print(f"=" * 60)
             if not groups:
                 print("  没有找到匹配的重复文件组")
+                if hash_only:
+                    print("\n提示: 使用 --all 参数可以查看所有组（包括未确认哈希值的）")
+                    print("      运行 'index hash' 可以计算未确认组的哈希值")
             else:
                 for i, group in enumerate(groups, 1):
                     print(f"\n{i}. 组ID: {group['group_id']}")
@@ -362,6 +388,10 @@ class CommandInterface:
                     print(f"   文件扩展名: {group['extension']}")
                     print(f"   文件数量: {group['file_count']} 个")
                     print(f"   可释放空间: {group['savable_space']:,} 字节")
+                    if group['hash']:
+                        print(f"   哈希值: {group['hash']}")
+                    else:
+                        print(f"   哈希值: 未确认")
             print(f"=" * 60)
             
         else:

@@ -210,10 +210,10 @@ class FileScanner:
         WHERE Size > 0
         ''')
         
-        # 插入到duplicate_groups表
+        # 插入到duplicate_groups表（Hash字段为空，等待index hash计算）
         cursor.execute('''
-        INSERT INTO duplicate_groups (Size, Extension)
-        SELECT Size, Extension
+        INSERT INTO duplicate_groups (Size, Extension, Hash)
+        SELECT Size, Extension, NULL
         FROM temp_files
         GROUP BY Size, Extension
         HAVING COUNT(*) > 1

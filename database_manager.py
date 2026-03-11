@@ -77,7 +77,8 @@ class DatabaseManager:
         CREATE TABLE IF NOT EXISTS duplicate_groups (
             ID INTEGER PRIMARY KEY AUTOINCREMENT,
             Size INTEGER,
-            Extension TEXT
+            Extension TEXT,
+            Hash TEXT
         )
         ''')
         

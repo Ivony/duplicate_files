@@ -204,11 +204,11 @@ class IndexManager:
                     groups[key] = []
                 groups[key].append(filepath)
             
-            # 插入重复文件组
+            # 插入重复文件组（Hash字段为空，等待index hash计算）
             for (ext, size), filepaths in groups.items():
                 cursor.execute('''
-                    INSERT INTO duplicate_groups (Extension, Size)
-                    VALUES (?, ?)
+                    INSERT INTO duplicate_groups (Extension, Size, Hash)
+                    VALUES (?, ?, NULL)
                 ''', (ext, size))
                 group_id = cursor.lastrowid
                 
