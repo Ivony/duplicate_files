@@ -29,6 +29,7 @@ class HashCalculator:
         self.total_size_calculated = 0
         self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
         self.start_time = 0
+        self.quiet = False
     
     def get_connection(self):
         """获取数据库连接"""
@@ -77,7 +78,7 @@ class HashCalculator:
             print(f"计算哈希失败 {file_path}: {e}")
             return None
     
-    def calculate_hash(self, mode='default', group_ids=None, filters=None):
+    def calculate_hash(self, mode='default', group_ids=None, filters=None, quiet=False):
         """计算哈希值
         
         Args:
@@ -87,6 +88,7 @@ class HashCalculator:
                 'force' - 强制更新模式：对duplicate_files表中所有文件重新计算哈希值
             group_ids: 指定的组ID列表，如果为None则根据filters选择组或选择所有组
             filters: 过滤器字典，如 {'extension': '.mp4', 'size': '>1000000', 'unconfirmed': True}
+            quiet: 是否减少输出信息
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -98,6 +100,7 @@ class HashCalculator:
         self.total_size_calculated = 0
         self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
         self.start_time = time.time()
+        self.quiet = quiet
         
         # 显示模式说明
         mode_desc = {
@@ -107,10 +110,11 @@ class HashCalculator:
             'verify': '验证模式 - 验证组的哈希值是否与所有文件一致'
         }
         
-        print("\n" + "=" * 80)
-        print("哈希值计算")
-        print("=" * 80)
-        print(f"模式: {mode_desc.get(mode, mode)}")
+        if not self.quiet:
+            print("\n" + "=" * 80)
+            print("哈希值计算")
+            print("=" * 80)
+            print(f"模式: {mode_desc.get(mode, mode)}")
         
         # 获取要处理的重复文件组
         if group_ids:
@@ -124,7 +128,8 @@ class HashCalculator:
                 GROUP BY dg.ID
                 ORDER BY dg.Size DESC
             ''', group_ids)
-            print(f"指定组ID: {', '.join(map(str, group_ids))}")
+            if not self.quiet:
+                print(f"指定组ID: {', '.join(map(str, group_ids))}")
         elif filters:
             # 根据过滤器选择组
             where_conditions = []
@@ -166,7 +171,8 @@ class HashCalculator:
                     filter_desc.append(f"大小: {filters['size']}")
                 if 'unconfirmed' in filters and filters['unconfirmed']:
                     filter_desc.append("未确认哈希值")
-                print(f"过滤条件: {', '.join(filter_desc)}")
+                if not self.quiet:
+                    print(f"过滤条件: {', '.join(filter_desc)}")
             else:
                 # 没有过滤器，获取所有组
                 cursor.execute('''
@@ -193,21 +199,24 @@ class HashCalculator:
         total_files = sum(group[3] for group in groups)
         total_size = sum(group[2] * group[3] for group in groups)
         
-        print(f"重复文件组数量: {total_groups}")
-        print(f"待处理文件数量: {total_files} 个")
-        print(f"待处理文件总大小: {self.format_size(total_size)}")
-        print("=" * 80)
+        if not self.quiet:
+            print(f"重复文件组数量: {total_groups}")
+            print(f"待处理文件数量: {total_files} 个")
+            print(f"待处理文件总大小: {self.format_size(total_size)}")
+            print("=" * 80)
         
         if total_groups == 0:
-            print("\n没有需要处理的文件")
+            if not self.quiet:
+                print("\n没有需要处理的文件")
             return
         
         # 按组处理
         for group_idx, (group_id, extension, size, file_count) in enumerate(groups, 1):
-            print(f"\n{'=' * 80}")
-            print(f"处理第 {group_idx}/{total_groups} 组 (Group_ID: {group_id})")
-            print(f"扩展名: {extension}, 文件大小: {self.format_size(size)}, 文件数量: {file_count}")
-            print(f"{'=' * 80}")
+            if not self.quiet:
+                print(f"\n{'=' * 80}")
+                print(f"处理第 {group_idx}/{total_groups} 组 (Group_ID: {group_id})")
+                print(f"扩展名: {extension}, 文件大小: {self.format_size(size)}, 文件数量: {file_count}")
+                print(f"{'=' * 80}")
             
             # 处理这个组
             self.process_group(group_id, mode, total_files, total_size)
@@ -215,21 +224,22 @@ class HashCalculator:
         elapsed = time.time() - self.start_time
         
         # 显示完成信息
-        print("\n" + "=" * 80)
-        print("哈希计算完成！")
-        print("=" * 80)
-        print(f"总处理文件数: {self.total_processed} 个")
-        print(f"总处理大小: {self.format_size(self.total_size_processed)}")
-        print(f"计算哈希文件数: {self.total_calculated} 个")
-        print(f"计算哈希大小: {self.format_size(self.total_size_calculated)}")
-        print(f"跳过文件数: {self.total_skipped} 个")
-        print(f"耗时: {elapsed:.2f} 秒")
-        
-        if elapsed > 0:
-            speed_files = self.total_processed / elapsed
-            speed_size = self.total_size_processed / elapsed
-            print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
-        print("=" * 80)
+        if not self.quiet:
+            print("\n" + "=" * 80)
+            print("哈希计算完成！")
+            print("=" * 80)
+            print(f"总处理文件数: {self.total_processed} 个")
+            print(f"总处理大小: {self.format_size(self.total_size_processed)}")
+            print(f"计算哈希文件数: {self.total_calculated} 个")
+            print(f"计算哈希大小: {self.format_size(self.total_size_calculated)}")
+            print(f"跳过文件数: {self.total_skipped} 个")
+            print(f"耗时: {elapsed:.2f} 秒")
+            
+            if elapsed > 0:
+                speed_files = self.total_processed / elapsed
+                speed_size = self.total_size_processed / elapsed
+                print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
+            print("=" * 80)
     
     def process_group(self, group_id, mode, total_files, total_size):
         """
@@ -263,7 +273,8 @@ class HashCalculator:
         
         if not files:
             conn.close()
-            print("该组没有需要处理的文件")
+            if not self.quiet:
+                print("该组没有需要处理的文件")
             return
         
         # 获取已计算的哈希值
@@ -276,7 +287,8 @@ class HashCalculator:
         results = []
         for file_path, file_size, file_modified in files:
             # 显示即将处理的文件（不换行）
-            print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
+            if not self.quiet:
+                print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
             
             # 检查是否需要跳过计算
             should_skip = False
@@ -285,7 +297,8 @@ class HashCalculator:
                 # 仅新增模式：如果file_hash表里有该文件的记录，就跳过
                 if file_path in existing_hashes:
                     should_skip = True
-                    print("跳过（已有哈希记录）")
+                    if not self.quiet:
+                        print("跳过（已有哈希记录）")
                     self.total_skipped += 1
                     self.total_processed += 1
                     self.total_size_processed += file_size
@@ -313,7 +326,8 @@ class HashCalculator:
                     
                     if file_size == db_size and abs(file_modified - db_modified) < 0.001:
                         should_skip = True
-                        print("跳过（文件未变化）")
+                        if not self.quiet:
+                            print("跳过（文件未变化）")
                         self.total_skipped += 1
                         self.total_processed += 1
                         self.total_size_processed += file_size
@@ -321,7 +335,8 @@ class HashCalculator:
             elif mode == 'verify':
                 # 验证模式：只验证，不计算哈希值
                 should_skip = True
-                print("验证中...")
+                if not self.quiet:
+                    print("验证中...")
                 self.total_skipped += 1
                 self.total_processed += 1
                 self.total_size_processed += file_size
@@ -336,9 +351,11 @@ class HashCalculator:
                     self.total_size_for_speed += file_size  # 计入速度计算
                     
                     # 显示完成并换行
-                    print("完成")
+                    if not self.quiet:
+                        print("完成")
                 else:
-                    print("失败")
+                    if not self.quiet:
+                        print("失败")
                     continue
         
         # 更新数据库
@@ -376,10 +393,12 @@ class HashCalculator:
         else:
             time_str = f"{remaining_time/3600:.1f} 小时"
         
-        print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒")
+        if not self.quiet:
+            print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒")
         
         # 分析该组的哈希值结果并更新数据库
-        print(f"\n分析该组的哈希值结果...")
+        if not self.quiet:
+            print(f"\n分析该组的哈希值结果...")
         
         # 获取该组的信息
         cursor.execute('SELECT Hash FROM duplicate_groups WHERE ID = ?', (group_id,))
@@ -441,15 +460,17 @@ class HashCalculator:
                         is_valid = False
                 
                 if is_valid:
-                    print(f"✓ 该组验证通过，哈希值一致且文件未变化")
-                    print(f"  组哈希值: {group_hash_val}")
+                    if not self.quiet:
+                        print(f"✓ 该组验证通过，哈希值一致且文件未变化")
+                        print(f"  组哈希值: {group_hash_val}")
                 else:
                     # 验证失败，清除组哈希值
                     cursor.execute('UPDATE duplicate_groups SET Hash = NULL WHERE ID = ?', (group_id,))
                     conn.commit()
-                    print(f"✗ 该组验证失败，已清除哈希值")
-                    for issue in validation_issues:
-                        print(f"  - {issue}")
+                    if not self.quiet:
+                        print(f"✗ 该组验证失败，已清除哈希值")
+                        for issue in validation_issues:
+                            print(f"  - {issue}")
             else:
                 # 按哈希值分组
                 hash_groups = {}
@@ -468,19 +489,22 @@ class HashCalculator:
                         UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
                     ''', (hash_val, group_id))
                     conn.commit()
-                    print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
-                    print(f"  哈希值: {hash_val}")
-                    print(f"  文件数量: {len(hash_groups[hash_val])}")
+                    if not self.quiet:
+                        print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
+                        print(f"  哈希值: {hash_val}")
+                        print(f"  文件数量: {len(hash_groups[hash_val])}")
                 elif len(hash_groups) == len(hash_results):
                     # 所有文件哈希值都不同，删除该组
                     cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
                     cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
                     conn.commit()
-                    print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
-                    print(f"  已删除该组（{len(hash_results)} 个文件）")
+                    if not self.quiet:
+                        print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
+                        print(f"  已删除该组（{len(hash_results)} 个文件）")
                 else:
                     # 部分文件哈希值相同，拆分为子组
-                    print(f"⚡ 该组拆分为 {len(hash_groups)} 个子组：")
+                    if not self.quiet:
+                        print(f"⚡ 该组拆分为 {len(hash_groups)} 个子组：")
                     
                     # 获取原组的信息
                     cursor.execute('SELECT Size, Extension FROM duplicate_groups WHERE ID = ?', (group_id,))
@@ -507,15 +531,18 @@ class HashCalculator:
                                     VALUES (?, ?)
                                 ''', (new_group_id, filepath))
                             
-                            print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
+                            if not self.quiet:
+                                print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
                         else:
-                            print(f"  子组 {idx}: 1 个文件 (独立文件，不创建组)")
+                            if not self.quiet:
+                                print(f"  子组 {idx}: 1 个文件 (独立文件，不创建组)")
                     
                     # 删除原组
                     cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
                     conn.commit()
         else:
-            print("该组没有计算哈希值的文件")
+            if not self.quiet:
+                print("该组没有计算哈希值的文件")
         
         conn.close()
     
@@ -539,12 +566,14 @@ if __name__ == '__main__':
         print("  calculate --new       - 仅计算从未计算过hash值的文件")
         print("  calculate --force     - 强制更新模式：对所有文件重新计算哈希值")
         print("  calculate --verify    - 验证模式：验证组的哈希值是否与所有文件一致")
+        print("  calculate --quiet     - 减少输出信息")
         sys.exit(1)
     
     command = sys.argv[1]
     
     if command == 'calculate':
         mode = 'default'
+        quiet = False
         if '--new' in sys.argv:
             mode = 'new'
         elif '--force' in sys.argv:
@@ -552,7 +581,10 @@ if __name__ == '__main__':
         elif '--verify' in sys.argv:
             mode = 'verify'
         
-        calculator.calculate_hash(mode)
+        if '--quiet' in sys.argv:
+            quiet = True
+        
+        calculator.calculate_hash(mode, quiet=quiet)
     else:
         print(f"未知命令: {command}")
         sys.exit(1)

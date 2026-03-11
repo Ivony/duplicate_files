@@ -39,9 +39,10 @@ class FileCleaner:
         """验证文件组的哈希值一致性"""
         from hash_calculator import HashCalculator
         
-        print(f"  验证文件组 {group_id} 的哈希值一致性...")
+        print(f"  正在校验组 {group_id}...")
         calculator = HashCalculator(self.db_path)
-        calculator.calculate_hash('verify', [group_id])
+        # 调用哈希计算器的验证模式，减少输出
+        calculator.calculate_hash('verify', [group_id], quiet=True)
         
         # 检查验证后组是否还有哈希值
         conn = self.get_connection()
@@ -210,9 +211,13 @@ class FileCleaner:
             keep_index = 0
             if not self.auto_confirm:
                 while True:
-                    choice = input("  请选择要保留的文件序号 (默认 1): ").strip()
+                    choice = input("  请选择要保留的文件序号 (默认 1, 输入 q 退出): ").strip().lower()
                     if not choice:
                         break
+                    if choice == 'q':
+                        print("  退出清理模式")
+                        conn.close()
+                        return
                     try:
                         keep_index = int(choice) - 1
                         if 0 <= keep_index < len(file_infos):
@@ -220,7 +225,7 @@ class FileCleaner:
                         else:
                             print("  无效的选择，请重新输入")
                     except ValueError:
-                        print("  无效的输入，请输入数字")
+                        print("  无效的输入，请输入数字或 q 退出")
             
             # 确定要保留和删除的文件
             keep_file = file_infos[keep_index]
