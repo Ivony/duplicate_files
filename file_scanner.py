@@ -3,7 +3,7 @@ import sqlite3
 import time
 import csv
 from datetime import datetime
-import config
+from config_manager import ConfigManager
 import re
 
 class FileScanner:
@@ -19,7 +19,8 @@ class FileScanner:
     
     def is_path_excluded(self, file_path):
         """检查路径是否被排除"""
-        for pattern in config.excluded_paths:
+        config_manager = ConfigManager()
+        for pattern in config_manager.get_excluded_patterns():
             if re.match(pattern, file_path):
                 return True
         return False
