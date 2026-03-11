@@ -145,11 +145,27 @@ class CommandInterface:
             },
             'clean': {
                 'description': '清理指令',
-                'subcommands': {
-                    'dryrun': '模拟清理操作',
-                    'safe': '安全模式清理',
-                    'auto': '自动模式清理',
-                    'preview': '预览清理操作'
+                'usage': 'clean [选项] [排序策略]',
+                'options': {
+                    '--dryrun': '模拟执行，不实际删除文件',
+                    '--yes, -y': '自动确认，不询问',
+                    '--group <ids>': '只清理指定的组ID（多个ID用逗号分隔）',
+                    '--min-size <size>': '只清理大于指定大小的文件组（支持K/M/G单位）',
+                    '--max-size <size>': '只清理小于指定大小的文件组（支持K/M/G单位）'
+                },
+                'strategies': {
+                    '--keep-newest': '保留最新文件 (默认)',
+                    '--keep-oldest': '保留最旧文件',
+                    '--keep-longest-name': '保留文件名最长的文件',
+                    '--keep-shortest-name': '保留文件名最短的文件',
+                    '--keep-longest-path': '保留路径最长的文件',
+                    '--keep-shortest-path': '保留路径最短的文件',
+                    '--keep-first-alpha-name': '按文件名字母顺序保留第一个',
+                    '--keep-last-alpha-name': '按文件名字母顺序保留最后一个',
+                    '--keep-first-alpha-path': '按路径字母顺序保留第一个',
+                    '--keep-last-alpha-path': '按路径字母顺序保留最后一个',
+                    '--keep-deepest': '保留目录最深的文件',
+                    '--keep-shallowest': '保留目录最浅的文件'
                 }
             }
         }
@@ -158,8 +174,33 @@ class CommandInterface:
             info = help_info[command]
             print(f"\n{command} 指令 - {info['description']}")
             print(f"=" * 60)
-            for subcmd, desc in info['subcommands'].items():
-                print(f"  {subcmd:<15} - {desc}")
+            
+            # 显示用法
+            if 'usage' in info:
+                print(f"用法: {info['usage']}")
+                print()
+            
+            # 显示子命令（旧格式）
+            if 'subcommands' in info:
+                print("子命令:")
+                for subcmd, desc in info['subcommands'].items():
+                    print(f"  {subcmd:<15} - {desc}")
+                print()
+            
+            # 显示选项（新格式）
+            if 'options' in info:
+                print("选项:")
+                for opt, desc in info['options'].items():
+                    print(f"  {opt:<20} - {desc}")
+                print()
+            
+            # 显示排序策略（新格式）
+            if 'strategies' in info:
+                print("排序策略:")
+                for strat, desc in info['strategies'].items():
+                    print(f"  {strat:<25} - {desc}")
+                print()
+            
             print(f"=" * 60)
         else:
             print(f"\n未知的命令: {command}")
@@ -536,25 +577,78 @@ class CommandInterface:
     
     def execute_clean_command(self, args):
         """执行clean命令"""
-        if not args:
-            print("错误: 请指定clean子命令")
-            self.show_command_help('clean')
-            return
-        
-        subcommand = args[0]
         cleaner = FileCleaner(self.db_path)
         
-        if subcommand == 'dryrun':
-            cleaner.dryrun_clean()
-        elif subcommand == 'safe':
-            cleaner.safe_clean()
-        elif subcommand == 'auto':
-            cleaner.auto_clean()
-        elif subcommand == 'preview':
-            cleaner.preview_clean()
-        else:
-            print(f"错误: 未知的clean子命令: {subcommand}")
-            self.show_command_help('clean')
+        # 解析参数
+        remaining_args = args
+        i = 0
+        while i < len(remaining_args):
+            arg = remaining_args[i]
+            
+            if arg == '--dryrun':
+                cleaner.dryrun = True
+            elif arg == '--yes' or arg == '-y':
+                cleaner.auto_confirm = True
+            elif arg == '--group' and i + 1 < len(remaining_args):
+                # 解析组ID
+                try:
+                    cleaner.group_ids = [int(gid) for gid in remaining_args[i + 1].split(',')]
+                except ValueError:
+                    print(f"错误: 无效的组ID: {remaining_args[i + 1]}")
+                    return
+                i += 1  # 跳过参数值
+            elif arg == '--min-size' and i + 1 < len(remaining_args):
+                # 解析最小大小
+                try:
+                    size_str = remaining_args[i + 1]
+                    if size_str.endswith('K'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024
+                    elif size_str.endswith('M'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024 * 1024
+                    elif size_str.endswith('G'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                    else:
+                        cleaner.min_size = int(size_str)
+                except ValueError:
+                    print(f"错误: 无效的大小值: {remaining_args[i + 1]}")
+                    return
+                i += 1  # 跳过参数值
+            elif arg == '--max-size' and i + 1 < len(remaining_args):
+                # 解析最大大小
+                try:
+                    size_str = remaining_args[i + 1]
+                    if size_str.endswith('K'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024
+                    elif size_str.endswith('M'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024 * 1024
+                    elif size_str.endswith('G'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                    else:
+                        cleaner.max_size = int(size_str)
+                except ValueError:
+                    print(f"错误: 无效的大小值: {remaining_args[i + 1]}")
+                    return
+                i += 1  # 跳过参数值
+            elif arg.startswith('--keep-'):
+                # 解析排序策略
+                strategy = arg[7:]  # 去掉 --keep-
+                valid_strategies = ['newest', 'oldest', 'longest_name', 'shortest_name', 
+                                   'longest_path', 'shortest_path', 'first_alpha_name', 
+                                   'last_alpha_name', 'first_alpha_path', 'last_alpha_path', 
+                                   'deepest', 'shallowest']
+                if strategy in valid_strategies:
+                    cleaner.sort_strategy = strategy
+                else:
+                    print(f"错误: 无效的排序策略: {strategy}")
+                    return
+            else:
+                print(f"错误: 未知的参数: {arg}")
+                return
+            
+            i += 1
+        
+        # 执行清理操作
+        cleaner.clean()
     
     def run(self):
         """运行交互式界面"""
