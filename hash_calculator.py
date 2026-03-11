@@ -103,7 +103,8 @@ class HashCalculator:
         mode_desc = {
             'default': '默认模式 - 检查并更新变化的文件',
             'new': '仅新增模式 - 仅计算从未计算过hash值的文件',
-            'force': '强制更新模式 - 对所有文件重新计算哈希值'
+            'force': '强制更新模式 - 对所有文件重新计算哈希值',
+            'verify': '验证模式 - 验证组的哈希值是否与所有文件一致'
         }
         
         print("\n" + "=" * 80)
@@ -317,6 +318,14 @@ class HashCalculator:
                         self.total_processed += 1
                         self.total_size_processed += file_size
             
+            elif mode == 'verify':
+                # 验证模式：只验证，不计算哈希值
+                should_skip = True
+                print("验证中...")
+                self.total_skipped += 1
+                self.total_processed += 1
+                self.total_size_processed += file_size
+            
             # 如果不需要跳过，计算哈希值
             if not should_skip:
                 result = self.calculate_file_hash(file_path)
@@ -372,78 +381,139 @@ class HashCalculator:
         # 分析该组的哈希值结果并更新数据库
         print(f"\n分析该组的哈希值结果...")
         
-        # 获取该组所有文件的哈希值
+        # 获取该组的信息
+        cursor.execute('SELECT Hash FROM duplicate_groups WHERE ID = ?', (group_id,))
+        group_hash = cursor.fetchone()
+        group_hash_val = group_hash[0] if group_hash else None
+        
+        # 获取该组所有文件的哈希值和文件信息
         cursor.execute('''
-            SELECT fh.Hash, df.Filepath
+            SELECT fh.Hash, fh.Size, fh.Modified, df.Filepath, f.Size as current_size, f.Modified as current_modified
             FROM duplicate_files df
             INNER JOIN file_hash fh ON df.Filepath = fh.Filepath
+            INNER JOIN files f ON df.Filepath = f.Filename
             WHERE df.Group_ID = ?
         ''', (group_id,))
         
         hash_results = cursor.fetchall()
         
         if hash_results:
-            # 按哈希值分组
-            hash_groups = {}
-            for hash_val, filepath in hash_results:
-                if hash_val not in hash_groups:
-                    hash_groups[hash_val] = []
-                hash_groups[hash_val].append(filepath)
-            
-            # 处理结果
-            if len(hash_groups) == 1:
-                # 所有文件哈希值相同，更新组的Hash字段
-                hash_val = list(hash_groups.keys())[0]
-                cursor.execute('''
-                    UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
-                ''', (hash_val, group_id))
-                conn.commit()
-                print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
-                print(f"  哈希值: {hash_val}")
-                print(f"  文件数量: {len(hash_groups[hash_val])}")
-            elif len(hash_groups) == len(hash_results):
-                # 所有文件哈希值都不同，删除该组
-                cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
-                cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
-                conn.commit()
-                print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
-                print(f"  已删除该组（{len(hash_results)} 个文件）")
+            # 验证模式的处理
+            if mode == 'verify':
+                is_valid = True
+                validation_issues = []
+                
+                # 检查组哈希值是否存在
+                if not group_hash_val:
+                    validation_issues.append("组哈希值未设置")
+                    is_valid = False
+                
+                # 检查每个文件
+                for file_hash, db_size, db_modified, filepath, current_size, current_modified in hash_results:
+                    # 检查文件哈希值是否与组哈希值一致
+                    if group_hash_val and file_hash != group_hash_val:
+                        validation_issues.append(f"文件哈希值不匹配: {filepath}")
+                        is_valid = False
+                    
+                    # 确保修改时间是数值类型
+                    if isinstance(db_modified, str):
+                        try:
+                            dt = datetime.fromisoformat(db_modified)
+                            db_modified = dt.timestamp()
+                        except:
+                            db_modified = float(db_modified)
+                    
+                    if isinstance(current_modified, str):
+                        try:
+                            dt = datetime.fromisoformat(current_modified)
+                            current_modified = dt.timestamp()
+                        except:
+                            current_modified = float(current_modified)
+                    
+                    # 检查文件大小是否变化
+                    if current_size != db_size:
+                        validation_issues.append(f"文件大小变化: {filepath}")
+                        is_valid = False
+                    
+                    # 检查文件修改时间是否变化
+                    if abs(current_modified - db_modified) >= 0.001:
+                        validation_issues.append(f"文件修改时间变化: {filepath}")
+                        is_valid = False
+                
+                if is_valid:
+                    print(f"✓ 该组验证通过，哈希值一致且文件未变化")
+                    print(f"  组哈希值: {group_hash_val}")
+                else:
+                    # 验证失败，清除组哈希值
+                    cursor.execute('UPDATE duplicate_groups SET Hash = NULL WHERE ID = ?', (group_id,))
+                    conn.commit()
+                    print(f"✗ 该组验证失败，已清除哈希值")
+                    for issue in validation_issues:
+                        print(f"  - {issue}")
             else:
-                # 部分文件哈希值相同，拆分为子组
-                print(f"⚡ 该组拆分为 {len(hash_groups)} 个子组：")
+                # 按哈希值分组
+                hash_groups = {}
+                for row in hash_results:
+                    hash_val = row[0]
+                    filepath = row[3]
+                    if hash_val not in hash_groups:
+                        hash_groups[hash_val] = []
+                    hash_groups[hash_val].append(filepath)
                 
-                # 获取原组的信息
-                cursor.execute('SELECT Size, Extension FROM duplicate_groups WHERE ID = ?', (group_id,))
-                row = cursor.fetchone()
-                size, extension = row if row else (0, '')
-                
-                # 删除原组的文件关联
-                cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
-                
-                # 为每个子组创建新的组
-                for idx, (hash_val, filepaths) in enumerate(hash_groups.items(), 1):
-                    if len(filepaths) > 1:
-                        # 只有多个文件才创建组
-                        cursor.execute('''
-                            INSERT INTO duplicate_groups (Size, Extension, Hash)
-                            VALUES (?, ?, ?)
-                        ''', (size, extension, hash_val))
-                        new_group_id = cursor.lastrowid
-                        
-                        # 添加文件关联
-                        for filepath in filepaths:
+                # 处理结果
+                if len(hash_groups) == 1:
+                    # 所有文件哈希值相同，更新组的Hash字段
+                    hash_val = list(hash_groups.keys())[0]
+                    cursor.execute('''
+                        UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
+                    ''', (hash_val, group_id))
+                    conn.commit()
+                    print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
+                    print(f"  哈希值: {hash_val}")
+                    print(f"  文件数量: {len(hash_groups[hash_val])}")
+                elif len(hash_groups) == len(hash_results):
+                    # 所有文件哈希值都不同，删除该组
+                    cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
+                    cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
+                    conn.commit()
+                    print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
+                    print(f"  已删除该组（{len(hash_results)} 个文件）")
+                else:
+                    # 部分文件哈希值相同，拆分为子组
+                    print(f"⚡ 该组拆分为 {len(hash_groups)} 个子组：")
+                    
+                    # 获取原组的信息
+                    cursor.execute('SELECT Size, Extension FROM duplicate_groups WHERE ID = ?', (group_id,))
+                    row = cursor.fetchone()
+                    size, extension = row if row else (0, '')
+                    
+                    # 删除原组的文件关联
+                    cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
+                    
+                    # 为每个子组创建新的组
+                    for idx, (hash_val, filepaths) in enumerate(hash_groups.items(), 1):
+                        if len(filepaths) > 1:
+                            # 只有多个文件才创建组
                             cursor.execute('''
-                                INSERT INTO duplicate_files (Group_ID, Filepath)
-                                VALUES (?, ?)
-                            ''', (new_group_id, filepath))
-                        
-                        print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
-                    else:
-                        print(f"  子组 {idx}: 1 个文件 (独立文件，不创建组)")
-                
-                # 删除原组
-                cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
-                conn.commit()
+                                INSERT INTO duplicate_groups (Size, Extension, Hash)
+                                VALUES (?, ?, ?)
+                            ''', (size, extension, hash_val))
+                            new_group_id = cursor.lastrowid
+                            
+                            # 添加文件关联
+                            for filepath in filepaths:
+                                cursor.execute('''
+                                    INSERT INTO duplicate_files (Group_ID, Filepath)
+                                    VALUES (?, ?)
+                                ''', (new_group_id, filepath))
+                            
+                            print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
+                        else:
+                            print(f"  子组 {idx}: 1 个文件 (独立文件，不创建组)")
+                    
+                    # 删除原组
+                    cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
+                    conn.commit()
         else:
             print("该组没有计算哈希值的文件")
         

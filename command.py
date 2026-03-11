@@ -234,6 +234,8 @@ class CommandInterface:
                     mode = 'new'
                 elif arg == '--force':
                     mode = 'force'
+                elif arg == '--verify':
+                    mode = 'verify'
                 elif arg == '--unconfirmed':
                     filters['unconfirmed'] = True
                 elif arg == '--extension' and i + 1 < len(remaining_args):
