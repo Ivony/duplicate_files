@@ -1,14 +1,113 @@
 import re
 import json
 import os
+import sqlite3
 
 class ConfigManager:
-    def __init__(self, config_path='config.json'):
+    def __init__(self, config_path='config.json', db_path='file_index.db'):
         self.config_path = config_path
-        self.config = self.load_config()
+        self.db_path = db_path
+        # 先从JSON文件加载配置
+        self.config = self._load_config_from_json()
+        # 然后初始化数据库配置表（会同步JSON配置到数据库）
+        self._init_db_config()
     
-    def load_config(self):
-        """加载配置文件"""
+    def _get_connection(self):
+        """获取数据库连接"""
+        return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
+    
+    def _init_db_config(self):
+        """初始化数据库配置表"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # 创建配置表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+        # 将JSON配置同步到数据库
+        self._sync_config_to_db()
+    
+    def _sync_config_to_db(self):
+        """将JSON配置同步到数据库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # 同步limit_path
+        limit_path = self.config.get('limit_path')
+        cursor.execute('''
+            INSERT OR REPLACE INTO config (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        ''', ('limit_path', json.dumps(limit_path)))
+        
+        # 同步excluded_patterns
+        excluded_patterns = self.config.get('excluded_patterns', [])
+        cursor.execute('''
+            INSERT OR REPLACE INTO config (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        ''', ('excluded_patterns', json.dumps(excluded_patterns)))
+        
+        conn.commit()
+        conn.close()
+    
+    def _load_config_from_db(self):
+        """从数据库加载配置"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        config = self.get_default_config()
+        
+        try:
+            cursor.execute('SELECT key, value FROM config')
+            rows = cursor.fetchall()
+            
+            for key, value in rows:
+                if key == 'limit_path':
+                    config['limit_path'] = json.loads(value)
+                elif key == 'excluded_patterns':
+                    config['excluded_patterns'] = json.loads(value)
+        except Exception as e:
+            print(f"从数据库加载配置失败: {e}")
+        
+        conn.close()
+        return config
+    
+    def _save_config_to_db(self):
+        """保存配置到数据库"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 保存limit_path
+            limit_path = self.config.get('limit_path')
+            cursor.execute('''
+                INSERT OR REPLACE INTO config (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            ''', ('limit_path', json.dumps(limit_path)))
+            
+            # 保存excluded_patterns
+            excluded_patterns = self.config.get('excluded_patterns', [])
+            cursor.execute('''
+                INSERT OR REPLACE INTO config (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            ''', ('excluded_patterns', json.dumps(excluded_patterns)))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"保存配置到数据库失败: {e}")
+        finally:
+            conn.close()
+    
+    def _load_config_from_json(self):
+        """从JSON文件加载配置"""
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
@@ -19,6 +118,21 @@ class ConfigManager:
         else:
             return self.get_default_config()
     
+    def load_config(self):
+        """加载配置文件（优先从数据库加载）"""
+        # 首先尝试从数据库加载
+        if os.path.exists(self.db_path):
+            try:
+                db_config = self._load_config_from_db()
+                # 如果数据库中有配置，使用数据库的配置
+                if db_config != self.get_default_config():
+                    return db_config
+            except Exception as e:
+                print(f"从数据库加载配置失败，尝试从JSON文件加载: {e}")
+        
+        # 从JSON文件加载
+        return self._load_config_from_json()
+    
     def get_default_config(self):
         """获取默认配置"""
         return {
@@ -27,13 +141,17 @@ class ConfigManager:
         }
     
     def save_config(self):
-        """保存配置文件"""
+        """保存配置文件（同时保存到JSON和数据库）"""
+        # 保存到JSON文件
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
             print(f"配置已保存到: {self.config_path}")
         except Exception as e:
             print(f"保存配置文件失败: {e}")
+        
+        # 保存到数据库
+        self._save_config_to_db()
     
     def set_limit(self, path):
         """设置检索范围限制"""
