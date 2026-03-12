@@ -64,7 +64,7 @@ class CommandInterface:
         print(f"      --extension <ext>     - 只显示指定扩展名的组")
         print(f"      --unconfirmed         - 包括未确认哈希值的组")
         print(f"      --sort size|count|path - 排序方式（默认size）")
-        print(f"  show group <id>           - 显示指定组的详细信息")
+        print(f"      --detail <id>         - 显示指定组的详细信息")
         print(f"  show files <pattern|path> [options] - 查询文件")
         print(f"                              支持路径: E:\\Downloads")
         print(f"                              支持模式: *.mp4, E:\\Downloads\\*.mp4")
@@ -147,8 +147,7 @@ class CommandInterface:
                 'usage': 'show <子命令> [选项]',
                 'subcommands': {
                     'summary': '显示数据汇总（文件总数、重复组数、可释放空间等）',
-                    'groups [options]': '显示重复文件组列表',
-                    'group <id>': '显示指定组的详细信息',
+                    'groups [options]': '显示重复文件组列表（使用 --detail <id> 查看组详情）',
                     'files <pattern|path> [options]': '查询文件（支持路径或模式）',
                     'hash <hash>': '显示指定哈希值的所有文件',
                     'stats [options]': '显示统计分析'
@@ -425,13 +424,14 @@ class CommandInterface:
             print(f"=" * 60)
             
         elif subcommand == 'groups':
-            # 显示重复文件组列表
+            # 显示重复文件组列表或指定组的详细信息
             count = 20
             hash_only = True
             min_size = None
             max_size = None
             extension = None
             sort_by = 'size'
+            detail_id = None
             
             # 解析参数
             i = 1
@@ -456,7 +456,41 @@ class CommandInterface:
                 elif arg == '--sort' and i + 1 < len(args):
                     sort_by = args[i + 1]
                     i += 1
+                elif arg == '--detail' and i + 1 < len(args):
+                    try:
+                        detail_id = int(args[i + 1])
+                    except ValueError:
+                        print(f"错误: 无效的组ID: {args[i + 1]}")
+                        return
+                    i += 1
                 i += 1
+            
+            # 如果指定了 --detail，显示组详情
+            if detail_id is not None:
+                group = self.analyzer.get_group_details(detail_id)
+                
+                if not group:
+                    print(f"错误: 找不到组ID: {detail_id}")
+                    return
+                
+                print(f"\n组 {detail_id} 的详细信息")
+                print(f"=" * 60)
+                print(f"文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
+                print(f"文件扩展名: {group['extension']}")
+                print(f"文件数量: {group['file_count']} 个")
+                print(f"总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
+                print(f"可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+                if group['hash']:
+                    print(f"哈希值: {group['hash']}")
+                else:
+                    print(f"哈希值: 未确认")
+                print(f"\n包含的文件:")
+                for i, file_info in enumerate(group['files'], 1):
+                    print(f"  {i}. {file_info['filepath']}")
+                    print(f"     磁盘: {file_info['disk']}")
+                    print(f"     修改时间: {file_info['modified']}")
+                print(f"=" * 60)
+                return
             
             # 获取组列表
             groups = self.analyzer.get_groups_list(
@@ -485,42 +519,6 @@ class CommandInterface:
                     else:
                         print(f"  哈希值: 未确认")
             
-            print(f"=" * 60)
-            
-        elif subcommand == 'group':
-            # 显示指定组的详细信息
-            if len(args) < 2:
-                print("错误: 请指定组ID")
-                return
-            
-            try:
-                group_id = int(args[1])
-            except ValueError:
-                print(f"错误: 无效的组ID: {args[1]}")
-                return
-            
-            group = self.analyzer.get_group_details(group_id)
-            
-            if not group:
-                print(f"错误: 找不到组ID: {group_id}")
-                return
-            
-            print(f"\n组 {group_id} 的详细信息")
-            print(f"=" * 60)
-            print(f"文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
-            print(f"文件扩展名: {group['extension']}")
-            print(f"文件数量: {group['file_count']} 个")
-            print(f"总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
-            print(f"可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
-            if group['hash']:
-                print(f"哈希值: {group['hash']}")
-            else:
-                print(f"哈希值: 未确认")
-            print(f"\n包含的文件:")
-            for i, file_info in enumerate(group['files'], 1):
-                print(f"  {i}. {file_info['filepath']}")
-                print(f"     磁盘: {file_info['disk']}")
-                print(f"     修改时间: {file_info['modified']}")
             print(f"=" * 60)
             
         elif subcommand == 'files':

@@ -638,7 +638,7 @@ def main():
         print("    --max-size <size>        - 最大文件大小")
         print("    --extension <ext>        - 按扩展名过滤")
         print("    --sort <size|count|path> - 排序方式")
-        print("  group <id>                 - 显示指定组的详细信息")
+        print("    --detail <id>            - 显示指定组的详细信息")
         print("  files <pattern> [options]  - 查询文件")
         print("    --all                    - 显示所有已索引文件")
         print("    --hash                   - 显示哈希值")
@@ -662,6 +662,7 @@ def main():
         max_size = None
         extension = None
         sort_by = 'size'
+        detail_id = None
         
         i = 2
         while i < len(sys.argv):
@@ -699,20 +700,20 @@ def main():
             elif arg == '--sort' and i + 1 < len(sys.argv):
                 sort_by = sys.argv[i + 1]
                 i += 1
+            elif arg == '--detail' and i + 1 < len(sys.argv):
+                try:
+                    detail_id = int(sys.argv[i + 1])
+                except ValueError:
+                    print(f"错误: 无效的组ID: {sys.argv[i + 1]}")
+                    sys.exit(1)
+                i += 1
             i += 1
         
-        viewer.show_groups(count, hash_only, min_size, max_size, extension, sort_by)
-    
-    elif command == 'group':
-        if len(sys.argv) < 3:
-            print("错误: 请指定组ID")
-            sys.exit(1)
-        try:
-            group_id = int(sys.argv[2])
-            viewer.show_group(group_id)
-        except ValueError:
-            print(f"错误: 无效的组ID: {sys.argv[2]}")
-            sys.exit(1)
+        # 如果指定了 --detail，显示组详情
+        if detail_id is not None:
+            viewer.show_group(detail_id)
+        else:
+            viewer.show_groups(count, hash_only, min_size, max_size, extension, sort_by)
     
     elif command == 'files':
         if len(sys.argv) < 3:
