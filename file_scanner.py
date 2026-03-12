@@ -107,9 +107,6 @@ class FileScanner:
         print(f"平均速度: {speed:.1f} 文件/秒")
         
         conn.close()
-        
-        # 扫描完成后自动建立重复文件组
-        self.build_duplicate_groups()
     
     def scan_from_csv(self, csv_path, encoding='utf-8'):
         """从CSV文件导入文件列表"""
@@ -187,66 +184,6 @@ class FileScanner:
         print(f"平均速度: {speed:.1f} 文件/秒")
         
         conn.close()
-        
-        # 导入完成后自动建立重复文件组
-        self.build_duplicate_groups()
-    
-    def build_duplicate_groups(self):
-        """建立重复文件组"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        print("\n开始建立重复文件组...")
-        
-        # 清空现有的重复文件组数据
-        cursor.execute('DELETE FROM duplicate_files')
-        cursor.execute('DELETE FROM duplicate_groups')
-        conn.commit()
-        
-        # 创建临时表来存储文件信息
-        cursor.execute('''
-        CREATE TEMP TABLE IF NOT EXISTS temp_files AS
-        SELECT Filename, Extension, Size
-        FROM files
-        WHERE Size > 0
-        ''')
-        
-        # 插入到duplicate_groups表（Hash字段为空，等待index hash计算）
-        cursor.execute('''
-        INSERT INTO duplicate_groups (Size, Extension, Hash)
-        SELECT Size, Extension, NULL
-        FROM temp_files
-        GROUP BY Size, Extension
-        HAVING COUNT(*) > 1
-        ''')
-        
-        # 重新插入到duplicate_files表
-        cursor.execute('''
-        INSERT INTO duplicate_files (Filepath, Group_ID)
-        SELECT 
-            tf.Filename,
-            dg.ID
-        FROM temp_files tf
-        INNER JOIN duplicate_groups dg ON tf.Size = dg.Size AND tf.Extension = dg.Extension
-        ''')
-        
-        # 获取创建的组数量
-        cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
-        group_count = cursor.fetchone()[0]
-        
-        # 获取有多少文件被分配到组
-        cursor.execute('SELECT COUNT(*) FROM duplicate_files')
-        file_count = cursor.fetchone()[0]
-        
-        # 清理临时表
-        cursor.execute('DROP TABLE IF EXISTS temp_files')
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"\n重复文件组建立完成！")
-        print(f"创建了 {group_count} 个重复文件组")
-        print(f"共有 {file_count} 个文件被分配到组中")
 
 if __name__ == '__main__':
     import sys
