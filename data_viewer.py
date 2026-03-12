@@ -538,25 +538,71 @@ class DataViewer:
         conn.close()
         return groups
     
-    def get_stats_by_extension(self):
-        """按扩展名统计"""
+    def get_duplicate_details(self, hash_value):
+        """获取指定哈希值的所有文件详情"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
-        SELECT Extension, COUNT(*) as count
-        FROM duplicate_groups
-        WHERE Hash IS NOT NULL AND Hash != ''
-        GROUP BY Extension
-        ORDER BY count DESC
-        ''')
+        SELECT 
+            df.Filepath,
+            dg.Size,
+            dg.Extension,
+            dg.Hash,
+            fh.created_at
+        FROM duplicate_files df
+        INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+        LEFT JOIN file_hash fh ON df.Filepath = fh.Filepath
+        WHERE dg.Hash = ?
+        ORDER BY df.Filepath
+        ''', (hash_value,))
         
-        result = {}
-        for ext, count in cursor.fetchall():
-            result[ext or '(无扩展名)'] = count
+        files = []
+        for row in cursor.fetchall():
+            filepath, size, extension, hash_val, created_at = row
+            
+            # 获取磁盘信息
+            disk = os.path.splitdrive(filepath)[0] if os.path.splitdrive(filepath)[0] else '未知'
+            
+            # 获取文件修改时间
+            try:
+                modified = datetime.fromtimestamp(os.path.getmtime(filepath)).isoformat()
+            except:
+                modified = '未知'
+            
+            files.append({
+                'filepath': filepath,
+                'disk': disk,
+                'size': size,
+                'extension': extension,
+                'hash': hash_val,
+                'modified': modified,
+                'created_at': created_at or '未知'
+            })
         
         conn.close()
-        return result
+        return files
+
+    def show_hash_files(self, hash_value):
+        """显示指定哈希值的所有文件"""
+        files = self.get_duplicate_details(hash_value)
+        
+        print(f"\n哈希值为 {hash_value} 的重复文件:")
+        print(f"=" * 60)
+        if not files:
+            print("  没有找到文件")
+        else:
+            for i, file_info in enumerate(files, 1):
+                print(f"\n{i}. 文件路径: {file_info['filepath']}")
+                print(f"   磁盘: {file_info['disk']}")
+                print(f"   大小: {file_info['size']:,} 字节")
+                print(f"   修改时间: {file_info['modified']}")
+                print(f"   哈希值: {file_info['hash']}")
+                print(f"   计算时间: {file_info['created_at']}")
+        print(f"=" * 60)
+
+    def get_stats_by_extension(self):
+        """按扩展名统计"""
     
     def get_stats_by_size_range(self):
         """按大小范围统计"""
@@ -654,6 +700,7 @@ def main():
         print("    --all                    - 显示所有已索引文件")
         print("    --hash                   - 显示哈希值")
         print("    --limit <n>              - 限制显示数量")
+        print("  hash <hash_value>          - 显示指定哈希值的所有文件")
         print("  stats [options]            - 统计分析（无参数时显示数据汇总）")
         print("    --by-extension           - 按扩展名统计")
         print("    --by-size-range          - 按大小范围统计")
@@ -746,6 +793,14 @@ def main():
             i += 1
         
         viewer.show_files(pattern, show_all, show_hash, limit)
+    
+    elif command == 'hash':
+        if len(sys.argv) < 3:
+            print("错误: 请指定哈希值")
+            sys.exit(1)
+        
+        hash_value = sys.argv[2]
+        viewer.show_hash_files(hash_value)
     
     elif command == 'stats':
         by_extension = False
