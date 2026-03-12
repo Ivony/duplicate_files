@@ -49,10 +49,10 @@ class CommandInterface:
         print(f"                              --extension <ext>  只计算指定扩展名的组")
         print(f"                              --size <op><size> 按文件大小过滤组（如>1000000）")
         print(f"                              --unconfirmed  只计算未确认哈希值的组")
-        print(f"  index clean             - 检查并清理索引文件（删除丢失文件、更新变更文件）")
-        print(f"  index clean files       - 清除文件索引，删除files表中的所有数据")
-        print(f"  index clean hash        - 清除哈希数据，删除file_hash表中的所有数据")
-        print(f"  index clean full        - 清除所有数据，删除files表和file_hash表中的所有数据")
+        print(f"  index clear             - 检查并清理索引文件（删除丢失文件、更新变更文件）")
+        print(f"  index clear files       - 清除文件索引，删除files表中的所有数据")
+        print(f"  index clear hash        - 清除哈希数据，删除file_hash表中的所有数据")
+        print(f"  index clear full        - 清除所有数据，删除files表和file_hash表中的所有数据")
         
         print(f"\nshow 指令:")
         print(f"  show groups [options]     - 显示重复文件组列表")
@@ -143,7 +143,7 @@ class CommandInterface:
                     'import': '从CSV文件导入文件列表（自动重建重复文件组）',
                     'rebuild': '重建重复文件组（按扩展名和大小分组）',
                     'hash': '计算所有可能重复文件的hash值',
-                    'clean': '清除索引数据'
+                    'clear': '清除索引数据'
                 }
             },
             'show': {
@@ -377,23 +377,22 @@ class CommandInterface:
             calculator = HashCalculator(self.db_path)
             calculator.calculate_hash(mode, group_ids, filters)
             
-        elif subcommand == 'clean':
+        elif subcommand == 'clear':
             manager = IndexManager(self.db_path)
             
             if len(args) < 2:
-                # 没有指定清理类型，执行索引清理
                 manager.clean_index()
             else:
-                clean_type = args[1]
+                clear_type = args[1]
                 
-                if clean_type == 'files':
+                if clear_type == 'files':
                     manager.clean_files()
-                elif clean_type == 'hash':
+                elif clear_type == 'hash':
                     manager.clean_hash()
-                elif clean_type == 'full':
+                elif clear_type == 'full':
                     manager.clean_full()
                 else:
-                    print(f"错误: 未知的清理类型: {clean_type}")
+                    print(f"错误: 未知的清理类型: {clear_type}")
             
         else:
             print(f"错误: 未知的index子命令: {subcommand}")
