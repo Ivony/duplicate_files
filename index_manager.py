@@ -177,7 +177,7 @@ class IndexManager:
                 print(f"更新了 {updated_count} 个变更的文件记录")
             
             # 重新计算重复文件组
-            self._rebuild_duplicate_groups(cursor)
+            self._rebuild_duplicate_groups_internal(cursor)
             conn.commit()
         else:
             print("\n没有需要清理的记录")
@@ -230,8 +230,106 @@ class IndexManager:
         
         print("\n索引重建完成！")
     
-    def _rebuild_duplicate_groups(self, cursor):
-        """重建重复文件组（内部方法）
+    def rebuild_duplicate_groups(self):
+        """重建重复文件组（公共方法）
+        
+        扫描files表，按照扩展名和大小创建重复文件组
+        可以被其他脚本引用
+        
+        Returns:
+            tuple: (groups_created, files_assigned) 创建的组数和分配的文件数
+        """
+        print("\n" + "=" * 60)
+        print("重建重复文件组")
+        print("=" * 60)
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 获取files表中的文件数量
+            cursor.execute('SELECT COUNT(*) FROM files')
+            total_files = cursor.fetchone()[0]
+            
+            if total_files == 0:
+                print("files表为空，无需重建")
+                conn.close()
+                return (0, 0)
+            
+            print(f"files表中有 {total_files} 个文件")
+            
+            # 清理旧的重复文件组数据
+            cursor.execute('DELETE FROM duplicate_files')
+            cursor.execute('DELETE FROM duplicate_groups')
+            conn.commit()
+            print("已清理旧的重复文件组数据")
+            
+            # 查找重复文件（扩展名和大小都相同）
+            cursor.execute('''
+                SELECT f.Filename, f.Extension, f.Size
+                FROM files f
+                INNER JOIN (
+                    SELECT Extension, Size
+                    FROM files
+                    GROUP BY Extension, Size
+                    HAVING COUNT(*) > 1
+                ) dup ON f.Extension = dup.Extension AND f.Size = dup.Size
+                ORDER BY f.Extension, f.Size, f.Filename
+            ''')
+            
+            duplicate_files = cursor.fetchall()
+            
+            if not duplicate_files:
+                print("没有找到重复文件（扩展名和大小都相同的文件）")
+                conn.close()
+                return (0, 0)
+            
+            # 按扩展名和大小分组
+            groups = {}
+            for filepath, ext, size in duplicate_files:
+                key = (ext, size)
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(filepath)
+            
+            # 插入重复文件组（Hash字段为空，等待index hash计算）
+            groups_created = 0
+            files_assigned = 0
+            
+            for (ext, size), filepaths in groups.items():
+                cursor.execute('''
+                    INSERT INTO duplicate_groups (Extension, Size, Hash)
+                    VALUES (?, ?, NULL)
+                ''', (ext, size))
+                group_id = cursor.lastrowid
+                groups_created += 1
+                
+                for filepath in filepaths:
+                    cursor.execute('''
+                        INSERT INTO duplicate_files (Group_ID, Filepath)
+                        VALUES (?, ?)
+                    ''', (group_id, filepath))
+                    files_assigned += 1
+            
+            conn.commit()
+            
+            print(f"\n重复文件组重建完成！")
+            print(f"创建了 {groups_created} 个重复文件组")
+            print(f"共有 {files_assigned} 个文件被分配到组中")
+            
+            return (groups_created, files_assigned)
+            
+        except Exception as e:
+            print(f"重建重复文件组时出错: {e}")
+            conn.rollback()
+            return (0, 0)
+        finally:
+            conn.close()
+        
+        print("=" * 60)
+    
+    def _rebuild_duplicate_groups_internal(self, cursor):
+        """重建重复文件组（内部方法，供clean_index使用）
         
         Args:
             cursor: 数据库游标
