@@ -164,7 +164,103 @@ class DatabaseManager:
         import shutil
         shutil.copy2(backup_path, self.db_path)
         print(f"数据库已从 {backup_path} 恢复")
-    
+
+    def backup_file_hash(self, backup_path):
+        """备份file_hash表到CSV文件
+
+        Args:
+            backup_path: 备份文件路径（.csv格式）
+        """
+        import csv
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 获取file_hash表的所有数据
+        cursor.execute('SELECT Filepath, Hash, created_at FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
+        rows = cursor.fetchall()
+
+        conn.close()
+
+        # 写入CSV文件
+        with open(backup_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Filepath', 'Hash', 'created_at'])  # 表头
+            writer.writerows(rows)
+
+        print(f"file_hash表已备份到: {backup_path}")
+        print(f"  共备份 {len(rows)} 条哈希记录")
+
+    def restore_file_hash(self, backup_path, merge=False):
+        """从CSV文件还原file_hash表
+
+        Args:
+            backup_path: 备份文件路径（.csv格式）
+            merge: 是否合并模式（True则保留现有数据，False则清空后导入）
+        """
+        import csv
+
+        if not os.path.exists(backup_path):
+            print(f"错误: 备份文件不存在: {backup_path}")
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 清空现有数据（非合并模式）
+        if not merge:
+            cursor.execute('DELETE FROM file_hash')
+            print("已清空现有file_hash表数据")
+
+        # 读取CSV文件并导入
+        imported_count = 0
+        skipped_count = 0
+
+        with open(backup_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # 跳过表头
+
+            for row in reader:
+                if len(row) >= 2:
+                    filepath, hash_val = row[0], row[1]
+                    created_at = row[2] if len(row) > 2 else None
+
+                    # 检查是否已存在
+                    cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Filepath = ?', (filepath,))
+                    if cursor.fetchone()[0] > 0:
+                        if merge:
+                            # 合并模式：更新现有记录
+                            cursor.execute('''
+                                UPDATE file_hash SET Hash = ?, created_at = ?
+                                WHERE Filepath = ?
+                            ''', (hash_val, created_at, filepath))
+                            imported_count += 1
+                        else:
+                            skipped_count += 1
+                    else:
+                        # 插入新记录
+                        cursor.execute('''
+                            INSERT INTO file_hash (Filepath, Hash, created_at)
+                            VALUES (?, ?, ?)
+                        ''', (filepath, hash_val, created_at))
+                        imported_count += 1
+
+        conn.commit()
+
+        # 统计结果
+        cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
+        total_count = cursor.fetchone()[0]
+
+        conn.close()
+
+        print(f"file_hash表已从 {backup_path} 还原")
+        print(f"  导入记录: {imported_count}")
+        if skipped_count > 0:
+            print(f"  跳过记录: {skipped_count}（已存在）")
+        print(f"  当前总记录数: {total_count}")
+
+        return True
+
     def get_index_status(self):
         """获取索引状态"""
         conn = self.get_connection()
@@ -241,23 +337,26 @@ class DatabaseManager:
 
 if __name__ == '__main__':
     import sys
-    
+
     manager = DatabaseManager()
-    
+
     if len(sys.argv) < 2:
         print("用法: python database_manager.py <command> [args]")
         print("\n可用命令:")
-        print("  init [--force]  - 初始化数据库结构（--force 强制重建，不询问）")
-        print("  check          - 检查数据库结构和数据")
-        print("  optimize        - 优化数据库性能")
-        print("  backup <path>  - 备份数据库")
-        print("  restore <path> - 从备份恢复数据库")
-        print("  status         - 查看索引状态")
-        print("  list <path>    - 列举指定路径的索引文件")
+        print("  init [--force]       - 初始化数据库结构（--force 强制重建，不询问）")
+        print("  check                - 检查数据库结构和数据")
+        print("  optimize             - 优化数据库性能")
+        print("  backup <path>        - 备份整个数据库")
+        print("  restore <path>       - 从备份恢复整个数据库")
+        print("  backup-hash <path>   - 备份file_hash表到CSV（.csv格式）")
+        print("  restore-hash <path> [--merge] - 从CSV还原file_hash表")
+        print("                         --merge: 合并模式（保留现有数据）")
+        print("  status               - 查看索引状态")
+        print("  list <path>          - 列举指定路径的索引文件")
         sys.exit(1)
-    
+
     command = sys.argv[1]
-    
+
     if command == 'init':
         force = '--force' in sys.argv
         manager.init_database(force)
@@ -275,6 +374,21 @@ if __name__ == '__main__':
             print("错误: 请指定备份文件路径")
             sys.exit(1)
         manager.restore_database(sys.argv[2])
+    elif command == 'backup-hash':
+        if len(sys.argv) < 3:
+            print("错误: 请指定备份文件路径（.csv格式）")
+            sys.exit(1)
+        backup_path = sys.argv[2]
+        if not backup_path.endswith('.csv'):
+            backup_path += '.csv'
+        manager.backup_file_hash(backup_path)
+    elif command == 'restore-hash':
+        if len(sys.argv) < 3:
+            print("错误: 请指定备份文件路径")
+            sys.exit(1)
+        backup_path = sys.argv[2]
+        merge = '--merge' in sys.argv
+        manager.restore_file_hash(backup_path, merge=merge)
     elif command == 'status':
         manager.get_index_status()
     elif command == 'list':

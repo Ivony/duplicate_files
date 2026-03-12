@@ -93,8 +93,11 @@ class CommandInterface:
         print(f"\ndb 指令:")
         print(f"  db check                - 检查数据库结构和数据")
         print(f"  db optimize             - 优化数据库性能")
-        print(f"  db backup <path>        - 备份数据库")
-        print(f"  db restore <path>       - 从备份恢复数据库")
+        print(f"  db backup <path>        - 备份整个数据库")
+        print(f"  db restore <path>       - 从备份恢复整个数据库")
+        print(f"  db backup-hash <path>   - 备份file_hash表到CSV（.csv格式）")
+        print(f"  db restore-hash <path> [--merge] - 从CSV还原file_hash表")
+        print(f"                            --merge: 合并模式（保留现有数据）")
         print(f"  db init [--force]       - 重建数据库结构（--force 强制重建，不询问）")
         
         print(f"\nclean 指令:")
@@ -195,8 +198,10 @@ class CommandInterface:
                 'subcommands': {
                     'check': '检查数据库结构和数据',
                     'optimize': '优化数据库性能',
-                    'backup': '备份数据库',
-                    'restore': '从备份恢复数据库',
+                    'backup <path>': '备份整个数据库',
+                    'restore <path>': '从备份恢复整个数据库',
+                    'backup-hash <path>': '备份file_hash表到CSV',
+                    'restore-hash <path> [--merge]': '从CSV还原file_hash表（--merge合并模式）',
                     'init': '重建数据库结构'
                 }
             },
@@ -839,6 +844,21 @@ class CommandInterface:
                 print("错误: 请指定备份文件路径")
                 return
             self.db_manager.restore_database(args[1])
+        elif subcommand == 'backup-hash':
+            if len(args) < 2:
+                print("错误: 请指定备份文件路径（.csv格式）")
+                return
+            backup_path = args[1]
+            if not backup_path.endswith('.csv'):
+                backup_path += '.csv'
+            self.db_manager.backup_file_hash(backup_path)
+        elif subcommand == 'restore-hash':
+            if len(args) < 2:
+                print("错误: 请指定备份文件路径")
+                return
+            backup_path = args[1]
+            merge = '--merge' in args
+            self.db_manager.restore_file_hash(backup_path, merge=merge)
         elif subcommand == 'init':
             force = '--force' in args
             self.db_manager.init_database(force)
