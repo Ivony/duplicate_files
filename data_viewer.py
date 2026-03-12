@@ -294,28 +294,46 @@ class DataViewer:
     def show_group(self, group_id):
         """显示指定组的详细信息"""
         group = self.get_group_details(group_id)
-        
+
         if not group:
             print(f"错误: 找不到组ID: {group_id}")
             return
-        
-        print(f"\n组 {group_id} 的详细信息")
-        print(f"=" * 60)
-        print(f"文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
-        print(f"文件扩展名: {group['extension']}")
-        print(f"文件数量: {group['file_count']} 个")
-        print(f"总大小: {group['group_size']:,} 字节 ({group['group_size']/1024/1024/1024:.2f} GB)")
-        print(f"可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
-        if group['hash']:
-            print(f"哈希值: {group['hash']}")
+
+        # 格式化文件大小
+        size = group['size']
+        if size >= 1024 * 1024 * 1024:
+            size_str = f"{size / 1024 / 1024 / 1024:.2f} GB"
+        elif size >= 1024 * 1024:
+            size_str = f"{size / 1024 / 1024:.2f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.2f} KB"
         else:
-            print(f"哈希值: 未确认")
-        print(f"\n包含的文件:")
+            size_str = f"{size} B"
+
+        # 格式化可释放空间
+        savable = group['savable_space']
+        if savable >= 1024 * 1024 * 1024:
+            savable_str = f"{savable / 1024 / 1024 / 1024:.2f} GB"
+        elif savable >= 1024 * 1024:
+            savable_str = f"{savable / 1024 / 1024:.2f} MB"
+        elif savable >= 1024:
+            savable_str = f"{savable / 1024:.2f} KB"
+        else:
+            savable_str = f"{savable} B"
+
+        # 哈希值显示（截短）
+        hash_str = group['hash'] if group['hash'] else "未确认"
+        if hash_str != "未确认" and len(hash_str) > 16:
+            hash_str = hash_str[:16] + "..."
+
+        print(f"\n组 #{group_id} | 大小: {size_str} | 扩展名: {group['extension'] or '无'} | 文件数: {group['file_count']} | 可释放: {savable_str} | 哈希: {hash_str}")
+        print(f"{'=' * 80}")
+
+        # 列出重复文件的绝对路径
         for i, file_info in enumerate(group['files'], 1):
             print(f"  {i}. {file_info['filepath']}")
-            print(f"     磁盘: {file_info['disk']}")
-            print(f"     修改时间: {file_info['modified']}")
-        print(f"=" * 60)
+
+        print(f"{'=' * 80}")
     
     def filter_by_pattern(self, pattern, hash_only=True):
         """使用通配符模式筛选重复文件组
