@@ -53,7 +53,6 @@ class CommandInterface:
         print(f"  index clean files       - 清除文件索引，删除files表中的所有数据")
         print(f"  index clean hash        - 清除哈希数据，删除file_hash表中的所有数据")
         print(f"  index clean full        - 清除所有数据，删除files表和file_hash表中的所有数据")
-        print(f"  index status            - 索引状态，展示索引的文件、重复文件组数量等")
         
         print(f"\nshow 指令:")
         print(f"  show summary              - 显示数据汇总（文件总数、重复组数、可释放空间等）")
@@ -140,8 +139,7 @@ class CommandInterface:
                     'import': '从CSV文件导入文件列表（自动重建重复文件组）',
                     'rebuild': '重建重复文件组（按扩展名和大小分组）',
                     'hash': '计算所有可能重复文件的hash值',
-                    'clean': '清除索引数据',
-                    'status': '索引状态'
+                    'clean': '清除索引数据'
                 }
             },
             'show': {
@@ -394,9 +392,6 @@ class CommandInterface:
                     manager.clean_full()
                 else:
                     print(f"错误: 未知的清理类型: {clean_type}")
-            
-        elif subcommand == 'status':
-            self.db_manager.get_index_status()
             
         else:
             print(f"错误: 未知的index子命令: {subcommand}")
