@@ -36,8 +36,11 @@ class CommandInterface:
         
         print(f"\nindex 指令:")
         print(f"  index scan <path>        - 扫描指定路径，将文件放入files表")
+        print(f"                              扫描后会自动重建重复文件组")
         print(f"  index import <csv>       - 从CSV文件导入文件列表")
+        print(f"                              导入后会自动重建重复文件组")
         print(f"                              --encoding <编码>  指定CSV文件的字符编码（默认utf-8）")
+        print(f"  index rebuild            - 重建重复文件组（按扩展名和大小分组）")
         print(f"  index hash [group_id]   - 计算指定组或所有组的hash值")
         print(f"                              group_id: 指定组ID，可以是单个或多个（逗号分隔）")
         print(f"                              --new       仅新增模式：仅计算从未计算过hash值的文件")
@@ -133,8 +136,9 @@ class CommandInterface:
             'index': {
                 'description': '扫描与索引指令',
                 'subcommands': {
-                    'scan': '扫描指定路径，将文件放入files表',
-                    'import': '从CSV文件导入文件列表',
+                    'scan': '扫描指定路径，将文件放入files表（自动重建重复文件组）',
+                    'import': '从CSV文件导入文件列表（自动重建重复文件组）',
+                    'rebuild': '重建重复文件组（按扩展名和大小分组）',
                     'hash': '计算所有可能重复文件的hash值',
                     'clean': '清除索引数据',
                     'status': '索引状态'
@@ -307,6 +311,9 @@ class CommandInterface:
             scanner = FileScanner(self.db_path)
             scanner.scan_directory(path)
             
+            # 自动重建重复文件组
+            self._rebuild_duplicate_groups()
+            
         elif subcommand == 'import':
             if len(args) < 2:
                 print("错误: 请指定CSV文件路径")
@@ -324,6 +331,13 @@ class CommandInterface:
             
             scanner = FileScanner(self.db_path)
             scanner.scan_from_csv(csv_path, encoding)
+            
+            # 自动重建重复文件组
+            self._rebuild_duplicate_groups()
+            
+        elif subcommand == 'rebuild':
+            # 重建重复文件组
+            self._rebuild_duplicate_groups()
             
         elif subcommand == 'hash':
             mode = 'default'
@@ -715,6 +729,99 @@ class CommandInterface:
             return int(size_str[:-1]) * 1024 * 1024 * 1024
         else:
             return int(size_str)
+    
+    def _rebuild_duplicate_groups(self):
+        """重建重复文件组
+        
+        扫描files表，按照扩展名和大小创建重复文件组
+        """
+        import sqlite3
+        
+        print("\n" + "=" * 60)
+        print("重建重复文件组")
+        print("=" * 60)
+        
+        conn = sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
+        cursor = conn.cursor()
+        
+        try:
+            # 获取files表中的文件数量
+            cursor.execute('SELECT COUNT(*) FROM files')
+            total_files = cursor.fetchone()[0]
+            
+            if total_files == 0:
+                print("files表为空，无需重建")
+                conn.close()
+                return
+            
+            print(f"files表中有 {total_files} 个文件")
+            
+            # 清理旧的重复文件组数据
+            cursor.execute('DELETE FROM duplicate_files')
+            cursor.execute('DELETE FROM duplicate_groups')
+            conn.commit()
+            print("已清理旧的重复文件组数据")
+            
+            # 查找重复文件（扩展名和大小都相同）
+            cursor.execute('''
+                SELECT f.Filename, f.Extension, f.Size
+                FROM files f
+                INNER JOIN (
+                    SELECT Extension, Size
+                    FROM files
+                    GROUP BY Extension, Size
+                    HAVING COUNT(*) > 1
+                ) dup ON f.Extension = dup.Extension AND f.Size = dup.Size
+                ORDER BY f.Extension, f.Size, f.Filename
+            ''')
+            
+            duplicate_files = cursor.fetchall()
+            
+            if not duplicate_files:
+                print("没有找到重复文件（扩展名和大小都相同的文件）")
+                conn.close()
+                return
+            
+            # 按扩展名和大小分组
+            groups = {}
+            for filepath, ext, size in duplicate_files:
+                key = (ext, size)
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(filepath)
+            
+            # 插入重复文件组（Hash字段为空，等待index hash计算）
+            groups_created = 0
+            files_assigned = 0
+            
+            for (ext, size), filepaths in groups.items():
+                cursor.execute('''
+                    INSERT INTO duplicate_groups (Extension, Size, Hash)
+                    VALUES (?, ?, NULL)
+                ''', (ext, size))
+                group_id = cursor.lastrowid
+                groups_created += 1
+                
+                for filepath in filepaths:
+                    cursor.execute('''
+                        INSERT INTO duplicate_files (Group_ID, Filepath)
+                        VALUES (?, ?)
+                    ''', (group_id, filepath))
+                    files_assigned += 1
+            
+            conn.commit()
+            
+            print(f"\n重复文件组重建完成！")
+            print(f"创建了 {groups_created} 个重复文件组")
+            print(f"共有 {files_assigned} 个文件被分配到组中")
+            
+        except Exception as e:
+            print(f"重建重复文件组时出错: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+        
+        print("=" * 60)
     
     def execute_export_command(self, args):
         """执行export命令"""
