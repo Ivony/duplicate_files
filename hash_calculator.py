@@ -2,11 +2,33 @@ import sqlite3
 import os
 import hashlib
 import time
+import mmap
 from datetime import datetime
+
+# 方案一：尝试导入 xxHash，如果失败则回退到 MD5
+try:
+    import xxhash
+    HASH_ALGORITHM = 'xxhash'
+    def get_hasher():
+        return xxhash.xxh64()
+    def get_hash_hexdigest(hasher):
+        return hasher.hexdigest()
+except ImportError:
+    HASH_ALGORITHM = 'md5'
+    def get_hasher():
+        return hashlib.md5()
+    def get_hash_hexdigest(hasher):
+        return hasher.hexdigest()
 
 class HashCalculator:
     """
-    哈希值计算器
+    哈希值计算器（性能优化版）
+    
+    优化方案：
+    1. 使用 xxHash 替代 MD5（速度提升 5-10 倍）
+    2. 动态调整缓冲区大小
+    3. 大文件使用内存映射（mmap）
+    4. 预读取优化
     
     重要说明：
     本类中的所有哈希计算操作都是顺序执行的，绝对不要使用并行计算（多线程或多进程）。
@@ -27,7 +49,7 @@ class HashCalculator:
         self.total_skipped = 0
         self.total_size_processed = 0
         self.total_size_calculated = 0
-        self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
+        self.total_size_for_speed = 0
         self.start_time = 0
         self.quiet = False
     
@@ -50,9 +72,62 @@ class HashCalculator:
             print(f"获取文件信息失败 {file_path}: {e}")
             return None
     
+    def _get_buffer_size(self, file_size):
+        """方案二：根据文件大小动态调整缓冲区大小"""
+        if file_size < 1024 * 1024:  # < 1MB
+            return 64 * 1024  # 64KB
+        elif file_size < 100 * 1024 * 1024:  # < 100MB
+            return 1024 * 1024  # 1MB
+        else:  # >= 100MB
+            return 4 * 1024 * 1024  # 4MB
+    
+    def _calculate_hash_mmap(self, file_path, file_size):
+        """方案五：使用内存映射计算大文件的哈希值"""
+        hasher = get_hasher()
+        with open(file_path, 'rb') as f:
+            # 方案六：预读取优化
+            try:
+                os.posix_fadvise(f.fileno(), 0, file_size, os.POSIX_FADV_SEQUENTIAL)
+            except (AttributeError, OSError):
+                pass
+            
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                # 分块处理，避免一次性处理过大的内存区域
+                chunk_size = self._get_buffer_size(file_size)
+                offset = 0
+                while offset < file_size:
+                    chunk = mm[offset:offset + chunk_size]
+                    hasher.update(chunk)
+                    offset += chunk_size
+        
+        return get_hash_hexdigest(hasher)
+    
+    def _calculate_hash_buffered(self, file_path, file_size):
+        """使用缓冲区读取计算哈希值"""
+        buffer_size = self._get_buffer_size(file_size)
+        hasher = get_hasher()
+        
+        with open(file_path, 'rb') as f:
+            # 方案六：预读取优化
+            try:
+                os.posix_fadvise(f.fileno(), 0, file_size, os.POSIX_FADV_SEQUENTIAL)
+            except (AttributeError, OSError):
+                pass
+            
+            while chunk := f.read(buffer_size):
+                hasher.update(chunk)
+        
+        return get_hash_hexdigest(hasher)
+    
     def calculate_file_hash(self, file_path):
         """
-        计算单个文件的哈希值
+        计算单个文件的哈希值（优化版）
+        
+        优化方案：
+        1. 使用 xxHash 替代 MD5
+        2. 根据文件大小动态调整缓冲区
+        3. 大文件使用内存映射
+        4. 预读取优化
         
         注意：此方法是顺序执行的，不要尝试使用多线程或多进程来并行计算多个文件的哈希值。
         哈希计算是磁盘IO密集型操作，并行计算会导致磁盘IO竞争，反而降低性能。
@@ -62,15 +137,23 @@ class HashCalculator:
             if file_info is None:
                 return None
             
-            hasher = hashlib.md5()
-            with open(file_path, 'rb') as f:
-                while chunk := f.read(65536):
-                    hasher.update(chunk)
+            file_size = file_info['size']
+            
+            # 方案五：大文件使用内存映射（>100MB）
+            # 注意：Windows 上 mmap 对小文件可能反而更慢
+            if file_size > 100 * 1024 * 1024 and hasattr(mmap, 'ACCESS_READ'):
+                try:
+                    hash_value = self._calculate_hash_mmap(file_path, file_size)
+                except Exception:
+                    # mmap 失败时回退到缓冲区读取
+                    hash_value = self._calculate_hash_buffered(file_path, file_size)
+            else:
+                hash_value = self._calculate_hash_buffered(file_path, file_size)
             
             return {
                 'filepath': file_path,
-                'size': file_info['size'],
-                'hash': hasher.hexdigest(),
+                'size': file_size,
+                'hash': hash_value,
                 'modified': file_info['modified'],
                 'created_at': datetime.now().isoformat()
             }
@@ -115,6 +198,7 @@ class HashCalculator:
             print("哈希值计算")
             print("=" * 80)
             print(f"模式: {mode_desc.get(mode, mode)}")
+            print(f"哈希算法: {HASH_ALGORITHM.upper()}")
         
         # 获取要处理的重复文件组
         if group_ids:
