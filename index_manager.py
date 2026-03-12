@@ -390,12 +390,13 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("用法: python index_manager.py <command> [args]")
         print("\n可用命令:")
-        print("  clean           - 检查并清理索引文件（删除丢失文件、更新变更文件）")
-        print("  clean files     - 清除文件索引")
-        print("  clean hash      - 清除哈希数据")
-        print("  clean full      - 清除所有数据")
-        print("  rebuild         - 重建索引（清除所有数据后重新扫描所有磁盘）")
-        print("  rebuild <path>  - 重建索引并扫描指定路径")
+        print("  clean              - 检查并清理索引文件（删除丢失文件、更新变更文件）")
+        print("  clean files        - 清除文件索引")
+        print("  clean hash         - 清除哈希数据")
+        print("  clean full         - 清除所有数据")
+        print("  rebuild            - 重建索引（清除所有数据后重新扫描所有磁盘）")
+        print("  rebuild <path>     - 重建索引并扫描指定路径")
+        print("  rebuild-groups     - 重建重复文件组（按扩展名和大小分组）")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -421,6 +422,9 @@ if __name__ == '__main__':
             manager.rebuild_index(scan_paths)
         else:
             manager.rebuild_index()
+    elif command == 'rebuild-groups':
+        # 重建重复文件组
+        manager.rebuild_duplicate_groups()
     else:
         print(f"未知命令: {command}")
         sys.exit(1)

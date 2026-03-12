@@ -406,34 +406,79 @@ class FileCleaner:
 if __name__ == '__main__':
     cleaner = FileCleaner()
     
-    # 简单测试
     if len(sys.argv) > 1:
-        cleaner.dryrun = '--dryrun' in sys.argv
-        cleaner.auto_confirm = '--yes' in sys.argv
-        
-        # 解析--script参数
-        if '--script' in sys.argv:
-            cleaner.script_mode = True
-            # 查找--script后面的路径参数
-            try:
-                script_idx = sys.argv.index('--script')
+        # 解析所有参数
+        i = 1
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            
+            if arg == '--dryrun':
+                cleaner.dryrun = True
+            elif arg == '--script':
+                cleaner.script_mode = True
                 # 检查是否有路径参数（下一个参数不以--开头）
-                if script_idx + 1 < len(sys.argv) and not sys.argv[script_idx + 1].startswith('--'):
-                    cleaner.script_path = sys.argv[script_idx + 1]
-            except ValueError:
-                pass
-        
-        # 解析排序策略
-        strategies = ['newest', 'oldest', 'longest_name', 'shortest_name', 
-                     'longest_path', 'shortest_path', 'first_alpha_name', 
-                     'last_alpha_name', 'first_alpha_path', 'last_alpha_path', 
-                     'deepest', 'shallowest']
-        
-        for arg in sys.argv:
-            for strategy in strategies:
-                if arg == f'--keep-{strategy}':
+                if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+                    cleaner.script_path = sys.argv[i + 1]
+                    i += 1
+            elif arg == '--yes' or arg == '-y':
+                cleaner.auto_confirm = True
+            elif arg == '--group' and i + 1 < len(sys.argv):
+                # 解析组ID
+                try:
+                    cleaner.group_ids = [int(gid) for gid in sys.argv[i + 1].split(',')]
+                    i += 1
+                except ValueError:
+                    print(f"错误: 无效的组ID: {sys.argv[i + 1]}")
+                    sys.exit(1)
+            elif arg == '--min-size' and i + 1 < len(sys.argv):
+                # 解析最小大小
+                try:
+                    size_str = sys.argv[i + 1]
+                    if size_str.endswith('K'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024
+                    elif size_str.endswith('M'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024 * 1024
+                    elif size_str.endswith('G'):
+                        cleaner.min_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                    else:
+                        cleaner.min_size = int(size_str)
+                    i += 1
+                except ValueError:
+                    print(f"错误: 无效的大小值: {sys.argv[i + 1]}")
+                    sys.exit(1)
+            elif arg == '--max-size' and i + 1 < len(sys.argv):
+                # 解析最大大小
+                try:
+                    size_str = sys.argv[i + 1]
+                    if size_str.endswith('K'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024
+                    elif size_str.endswith('M'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024 * 1024
+                    elif size_str.endswith('G'):
+                        cleaner.max_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+                    else:
+                        cleaner.max_size = int(size_str)
+                    i += 1
+                except ValueError:
+                    print(f"错误: 无效的大小值: {sys.argv[i + 1]}")
+                    sys.exit(1)
+            elif arg.startswith('--keep-'):
+                # 解析排序策略
+                strategy = arg[7:]  # 去掉 --keep-
+                valid_strategies = ['newest', 'oldest', 'longest_name', 'shortest_name', 
+                                   'longest_path', 'shortest_path', 'first_alpha_name', 
+                                   'last_alpha_name', 'first_alpha_path', 'last_alpha_path', 
+                                   'deepest', 'shallowest']
+                if strategy in valid_strategies:
                     cleaner.sort_strategy = strategy
-                    break
+                else:
+                    print(f"错误: 无效的排序策略: {strategy}")
+                    sys.exit(1)
+            else:
+                print(f"错误: 未知的参数: {arg}")
+                sys.exit(1)
+            
+            i += 1
         
         cleaner.clean()
     else:
@@ -443,7 +488,10 @@ if __name__ == '__main__':
         print("  --script [path]         生成删除脚本，不实际删除文件")
         print("                          path: 脚本文件路径（可选，根据扩展名自动判断类型）")
         print("                          支持: .cmd/.bat (CMD), .sh/.bash (Bash), .ps1 (PowerShell)")
-        print("  --yes                   自动确认，不询问")
+        print("  --yes, -y               自动确认，不询问")
+        print("  --group <id1,id2,...>   只处理指定的组ID（逗号分隔）")
+        print("  --min-size <size>       最小文件大小（支持K/M/G后缀）")
+        print("  --max-size <size>       最大文件大小（支持K/M/G后缀）")
         print("\n排序策略:")
         print("  --keep-newest           保留最新文件 (默认)")
         print("  --keep-oldest           保留最旧文件")
