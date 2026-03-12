@@ -36,7 +36,6 @@ class CommandInterface:
         
         print(f"\nindex 指令:")
         print(f"  index scan <path>        - 扫描指定路径，将文件放入files表")
-        print(f"  index full <path>       - 执行完整扫描流程：扫描 → 索引 → 哈希计算")
         print(f"  index import <csv>       - 从CSV文件导入文件列表")
         print(f"                              --encoding <编码>  指定CSV文件的字符编码（默认utf-8）")
         print(f"  index hash [group_id]   - 计算指定组或所有组的hash值")
@@ -51,9 +50,7 @@ class CommandInterface:
         print(f"  index clean files       - 清除文件索引，删除files表中的所有数据")
         print(f"  index clean hash        - 清除哈希数据，删除file_hash表中的所有数据")
         print(f"  index clean full        - 清除所有数据，删除files表和file_hash表中的所有数据")
-        print(f"  index rebuild           - 重建索引，删除所有数据后重新扫描所有磁盘")
         print(f"  index status            - 索引状态，展示索引的文件、重复文件组数量等")
-        print(f"  index list <path>       - 列举索引，显示指定路径下已经索引的文件和哈希值状态")
         
         print(f"\nshow 指令:")
         print(f"  show summary              - 显示数据汇总（文件总数、重复组数、可释放空间等）")
@@ -66,15 +63,19 @@ class CommandInterface:
         print(f"      --unconfirmed         - 包括未确认哈希值的组")
         print(f"      --sort size|count|path - 排序方式（默认size）")
         print(f"  show group <id>           - 显示指定组的详细信息")
-        print(f"  show files <pattern>      - 按模式搜索文件")
-        print(f"                              支持: *.mp4, E:\\Downloads\\*.mp4")
+        print(f"  show files <pattern|path> [options] - 查询文件")
+        print(f"                              支持路径: E:\\Downloads")
+        print(f"                              支持模式: *.mp4, E:\\Downloads\\*.mp4")
+        print(f"                              options:")
+        print(f"                                --all       显示所有文件（包括非重复）")
+        print(f"                                --hash      显示哈希状态和哈希值")
+        print(f"                                --limit N   限制显示数量（默认100）")
         print(f"  show hash <hash>          - 显示指定哈希值的所有文件")
         print(f"  show stats [options]      - 显示统计分析")
         print(f"    options:")
         print(f"      --by-extension        - 按扩展名统计")
         print(f"      --by-size-range       - 按大小范围统计")
         print(f"      --by-date             - 按日期统计")
-        print(f"  show path <path>          - 显示指定路径下的重复文件")
         
         print(f"\nexport 指令:")
         print(f"  export csv <path>      - 导出分析结果为CSV格式")
@@ -133,13 +134,10 @@ class CommandInterface:
                 'description': '扫描与索引指令',
                 'subcommands': {
                     'scan': '扫描指定路径，将文件放入files表',
-                    'full': '执行完整扫描流程：扫描 → 索引 → 哈希计算',
                     'import': '从CSV文件导入文件列表',
                     'hash': '计算所有可能重复文件的hash值',
                     'clean': '清除索引数据',
-                    'rebuild': '重建索引',
-                    'status': '索引状态',
-                    'list': '列举索引'
+                    'status': '索引状态'
                 }
             },
             'show': {
@@ -149,10 +147,14 @@ class CommandInterface:
                     'summary': '显示数据汇总（文件总数、重复组数、可释放空间等）',
                     'groups [options]': '显示重复文件组列表',
                     'group <id>': '显示指定组的详细信息',
-                    'files <pattern>': '按模式搜索文件',
+                    'files <pattern|path> [options]': '查询文件（支持路径或模式）',
                     'hash <hash>': '显示指定哈希值的所有文件',
-                    'stats [options]': '显示统计分析',
-                    'path <path>': '显示指定路径下的重复文件'
+                    'stats [options]': '显示统计分析'
+                },
+                'files_options': {
+                    '--all': '显示所有文件（包括非重复）',
+                    '--hash': '显示哈希状态和哈希值',
+                    '--limit N': '限制显示数量（默认100）'
                 },
                 'group_options': {
                     '--top N': '显示最大的N个组（默认20）',
@@ -167,10 +169,11 @@ class CommandInterface:
                     '--by-size-range': '按大小范围统计',
                     '--by-date': '按日期统计'
                 },
-                'filter_examples': [
-                    '*.mp4 - 筛选所有mp4文件',
-                    'E:\\ - 筛选E盘的所有文件',
-                    'E:\\Downloads\\*.mp4 - 筛选Downloads目录下的mp4文件'
+                'files_examples': [
+                    'E:\\Downloads - 查询路径下的所有文件',
+                    '*.mp4 - 查询所有mp4文件',
+                    'E:\\Downloads\\*.mp4 - 查询Downloads目录下的mp4文件',
+                    'E:\\Downloads --all --hash - 查询路径下所有文件及哈希状态'
                 ]
             },
             'export': {
@@ -304,21 +307,6 @@ class CommandInterface:
             scanner = FileScanner(self.db_path)
             scanner.scan_directory(path)
             
-        elif subcommand == 'full':
-            if len(args) < 2:
-                print("错误: 请指定要扫描的路径")
-                return
-            path = args[1]
-            if not os.path.exists(path) or not os.path.isdir(path):
-                print(f"错误: 路径不存在或不是目录: {path}")
-                return
-            
-            scanner = FileScanner(self.db_path)
-            scanner.scan_directory(path)
-            
-            calculator = HashCalculator(self.db_path)
-            calculator.calculate_hash('default')
-            
         elif subcommand == 'import':
             if len(args) < 2:
                 print("错误: 请指定CSV文件路径")
@@ -393,23 +381,8 @@ class CommandInterface:
                 else:
                     print(f"错误: 未知的清理类型: {clean_type}")
             
-        elif subcommand == 'rebuild':
-            manager = IndexManager(self.db_path)
-            if len(args) > 1:
-                scan_paths = args[1:]
-                manager.rebuild_index(scan_paths)
-            else:
-                manager.rebuild_index()
-            
         elif subcommand == 'status':
             self.db_manager.get_index_status()
-            
-        elif subcommand == 'list':
-            if len(args) < 2:
-                print("错误: 请指定路径")
-                return
-            
-            self.db_manager.list_indexed_files(args[1])
             
         else:
             print(f"错误: 未知的index子命令: {subcommand}")
@@ -542,33 +515,122 @@ class CommandInterface:
             print(f"=" * 60)
             
         elif subcommand == 'files':
-            # 按模式搜索文件
+            # 统一的文件查询指令
             if len(args) < 2:
-                print("错误: 请指定搜索模式")
+                print("错误: 请指定路径或模式")
                 return
             
             pattern = args[1]
-            groups = self.analyzer.filter_by_pattern(pattern, hash_only=True)
+            show_all = False
+            show_hash = False
+            limit = 100
             
-            print(f"\n文件搜索结果（模式: {pattern}）")
-            print(f"=" * 60)
+            # 解析选项
+            i = 2
+            while i < len(args):
+                arg = args[i]
+                if arg == '--all':
+                    show_all = True
+                elif arg == '--hash':
+                    show_hash = True
+                elif arg == '--limit' and i + 1 < len(args):
+                    try:
+                        limit = int(args[i + 1])
+                        i += 1
+                    except ValueError:
+                        print(f"错误: 无效的限制数量: {args[i + 1]}")
+                        return
+                i += 1
             
-            if not groups:
-                print("  没有找到匹配的文件")
+            # 判断是路径还是模式（包含通配符）
+            has_wildcard = '*' in pattern or '?' in pattern
+            
+            if has_wildcard:
+                # 模式搜索：查找重复文件组
+                groups = self.analyzer.filter_by_pattern(pattern, hash_only=True)
+                
+                print(f"\n文件搜索结果（模式: {pattern}）")
+                print(f"=" * 60)
+                
+                if not groups:
+                    print("  没有找到匹配的文件")
+                else:
+                    print(f"  找到 {len(groups)} 个匹配的重复文件组")
+                    for i, group in enumerate(groups[:limit], 1):
+                        print(f"\n{i}. 组ID: {group['group_id']}")
+                        print(f"   文件大小: {group['size']:,} 字节")
+                        print(f"   文件扩展名: {group['extension']}")
+                        print(f"   文件数量: {group['file_count']} 个")
+                        print(f"   匹配的文件:")
+                        for j, filepath in enumerate(group['matched_files'][:5], 1):
+                            print(f"     {j}. {filepath}")
+                        if len(group['matched_files']) > 5:
+                            print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+                    
+                    if len(groups) > limit:
+                        print(f"\n... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）")
+                
+                print(f"=" * 60)
             else:
-                print(f"  找到 {len(groups)} 个匹配的重复文件组")
-                for i, group in enumerate(groups, 1):
-                    print(f"\n{i}. 组ID: {group['group_id']}")
-                    print(f"   文件大小: {group['size']:,} 字节")
-                    print(f"   文件扩展名: {group['extension']}")
-                    print(f"   文件数量: {group['file_count']} 个")
-                    print(f"   匹配的文件:")
-                    for j, filepath in enumerate(group['matched_files'][:5], 1):
-                        print(f"     {j}. {filepath}")
-                    if len(group['matched_files']) > 5:
-                        print(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
-            
-            print(f"=" * 60)
+                # 路径查询：显示已索引的文件
+                if show_all:
+                    # 显示所有已索引文件
+                    conn = self.db_manager.get_connection()
+                    cursor = conn.cursor()
+                    
+                    query = '''
+                        SELECT f.Filename, f.Size, f.Modified, fh.Hash, fh.created_at
+                        FROM files f
+                        LEFT JOIN file_hash fh ON f.Filename = fh.Filepath
+                        WHERE f.Filename LIKE ?
+                        ORDER BY f.Filename
+                        LIMIT ?
+                    '''
+                    cursor.execute(query, (f"{pattern}%", limit))
+                    files = cursor.fetchall()
+                    conn.close()
+                    
+                    print(f"\n路径 {pattern} 下已索引的文件:")
+                    if not files:
+                        print("  没有找到已索引的文件")
+                    else:
+                        for i, (filename, size, modified, hash_val, created_at) in enumerate(files, 1):
+                            hash_status = "已计算" if hash_val else "未计算"
+                            print(f"  {i}. {filename}")
+                            print(f"     大小: {size:,} 字节, 修改时间: {modified}, 哈希状态: {hash_status}")
+                            if show_hash and hash_val:
+                                print(f"     哈希值: {hash_val}")
+                                if created_at:
+                                    print(f"     计算时间: {created_at}")
+                    
+                    if len(files) >= limit:
+                        print(f"\n... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）")
+                else:
+                    # 显示路径下的重复文件组
+                    groups = self.analyzer.get_groups_by_path(pattern)
+                    
+                    print(f"\n路径 {pattern} 下的重复文件")
+                    print(f"=" * 60)
+                    
+                    if not groups:
+                        print("  没有找到重复文件")
+                    else:
+                        print(f"  找到 {len(groups)} 个重复文件组")
+                        for i, group in enumerate(groups[:limit], 1):
+                            print(f"\n{i}. 组ID: {group['group_id']}")
+                            print(f"   文件大小: {group['size']:,} 字节")
+                            print(f"   文件扩展名: {group['extension']}")
+                            print(f"   文件数量: {group['file_count']} 个")
+                            print(f"   包含的文件:")
+                            for j, filepath in enumerate(group['files'][:5], 1):
+                                print(f"     {j}. {filepath}")
+                            if len(group['files']) > 5:
+                                print(f"     ... 还有 {len(group['files']) - 5} 个文件")
+                        
+                        if len(groups) > limit:
+                            print(f"\n... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）")
+                    
+                    print(f"=" * 60)
             
         elif subcommand == 'hash':
             # 显示指定哈希值的所有文件
@@ -638,35 +700,6 @@ class CommandInterface:
                 print("  --by-date         按日期统计")
                 print(f"=" * 60)
                 
-        elif subcommand == 'path':
-            # 显示指定路径下的重复文件
-            if len(args) < 2:
-                print("错误: 请指定路径")
-                return
-            
-            path = args[1]
-            groups = self.analyzer.get_groups_by_path(path)
-            
-            print(f"\n路径 {path} 下的重复文件")
-            print(f"=" * 60)
-            
-            if not groups:
-                print("  没有找到重复文件")
-            else:
-                print(f"  找到 {len(groups)} 个重复文件组")
-                for i, group in enumerate(groups, 1):
-                    print(f"\n{i}. 组ID: {group['group_id']}")
-                    print(f"   文件大小: {group['size']:,} 字节")
-                    print(f"   文件扩展名: {group['extension']}")
-                    print(f"   文件数量: {group['file_count']} 个")
-                    print(f"   包含的文件:")
-                    for j, filepath in enumerate(group['files'][:5], 1):
-                        print(f"     {j}. {filepath}")
-                    if len(group['files']) > 5:
-                        print(f"     ... 还有 {len(group['files']) - 5} 个文件")
-            
-            print(f"=" * 60)
-            
         else:
             print(f"错误: 未知的show子命令: {subcommand}")
             self.show_command_help('show')
