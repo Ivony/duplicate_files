@@ -4,7 +4,7 @@ from database_manager import DatabaseManager
 from file_scanner import FileScanner
 from hash_calculator import HashCalculator
 from index_manager import IndexManager
-from duplicate_analyzer import DuplicateAnalyzer
+from data_viewer import DataViewer
 from export_manager import ExportManager
 from config_manager import ConfigManager
 from file_cleaner import FileCleaner
@@ -14,7 +14,7 @@ class CommandInterface:
         self.db_path = db_path
         self.db_manager = DatabaseManager(db_path)
         self.config_manager = ConfigManager()
-        self.analyzer = DuplicateAnalyzer(db_path)
+        self.analyzer = DataViewer(db_path)
         self.analyzer.path_limit = self.config_manager.get_limit_path()
     
     def show_help(self, command=None):
