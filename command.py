@@ -49,7 +49,7 @@ class CommandInterface:
         print(f"                              --extension <ext>  只计算指定扩展名的组")
         print(f"                              --size <op><size> 按文件大小过滤组（如>1000000）")
         print(f"                              --unconfirmed  只计算未确认哈希值的组")
-        print(f"  index clear             - 检查并清理索引文件（删除丢失文件、更新变更文件）")
+        print(f"  index rebuild           - 检查并清理索引文件，然后重建重复文件组")
         print(f"  index clear files       - 清除文件索引，删除files表中的所有数据")
         print(f"  index clear hash        - 清除哈希数据，删除file_hash表中的所有数据")
         print(f"  index clear full        - 清除所有数据，删除files表和file_hash表中的所有数据")
@@ -141,9 +141,9 @@ class CommandInterface:
                 'subcommands': {
                     'scan': '扫描指定路径，将文件放入files表（自动重建重复文件组）',
                     'import': '从CSV文件导入文件列表（自动重建重复文件组）',
-                    'rebuild': '重建重复文件组（按扩展名和大小分组）',
+                    'rebuild': '检查并清理索引文件，然后重建重复文件组',
                     'hash': '计算所有可能重复文件的hash值',
-                    'clear': '清除索引数据'
+                    'clear files/hash/full': '清除索引数据'
                 }
             },
             'show': {
@@ -336,7 +336,8 @@ class CommandInterface:
             self._rebuild_duplicate_groups()
             
         elif subcommand == 'rebuild':
-            # 重建重复文件组
+            manager = IndexManager(self.db_path)
+            manager.clean_index()
             self._rebuild_duplicate_groups()
             
         elif subcommand == 'hash':
@@ -378,21 +379,21 @@ class CommandInterface:
             calculator.calculate_hash(mode, group_ids, filters)
             
         elif subcommand == 'clear':
-            manager = IndexManager(self.db_path)
-            
             if len(args) < 2:
-                manager.clean_index()
+                print("错误: 请指定清理类型 (files/hash/full)")
+                return
+            
+            manager = IndexManager(self.db_path)
+            clear_type = args[1]
+            
+            if clear_type == 'files':
+                manager.clean_files()
+            elif clear_type == 'hash':
+                manager.clean_hash()
+            elif clear_type == 'full':
+                manager.clean_full()
             else:
-                clear_type = args[1]
-                
-                if clear_type == 'files':
-                    manager.clean_files()
-                elif clear_type == 'hash':
-                    manager.clean_hash()
-                elif clear_type == 'full':
-                    manager.clean_full()
-                else:
-                    print(f"错误: 未知的清理类型: {clear_type}")
+                print(f"错误: 未知的清理类型: {clear_type}")
             
         else:
             print(f"错误: 未知的index子命令: {subcommand}")

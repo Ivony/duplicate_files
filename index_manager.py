@@ -390,31 +390,31 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("用法: python index_manager.py <command> [args]")
         print("\n可用命令:")
-        print("  clear              - 检查并清理索引文件（删除丢失文件、更新变更文件）")
         print("  clear files        - 清除文件索引")
         print("  clear hash         - 清除哈希数据")
         print("  clear full         - 清除所有数据")
         print("  rebuild            - 重建索引（清除所有数据后重新扫描所有磁盘）")
         print("  rebuild <path>     - 重建索引并扫描指定路径")
-        print("  rebuild-groups     - 重建重复文件组（按扩展名和大小分组）")
+        print("  rebuild-groups     - 检查并清理索引文件，然后重建重复文件组")
         sys.exit(1)
     
     command = sys.argv[1]
     
     if command == 'clear':
         if len(sys.argv) < 3:
-            manager.clean_index()
+            print("错误: 请指定清理类型 (files/hash/full)")
+            sys.exit(1)
+        
+        clear_type = sys.argv[2]
+        if clear_type == 'files':
+            manager.clean_files()
+        elif clear_type == 'hash':
+            manager.clean_hash()
+        elif clear_type == 'full':
+            manager.clean_full()
         else:
-            clear_type = sys.argv[2]
-            if clear_type == 'files':
-                manager.clean_files()
-            elif clear_type == 'hash':
-                manager.clean_hash()
-            elif clear_type == 'full':
-                manager.clean_full()
-            else:
-                print(f"错误: 未知的清理类型: {clear_type}")
-                sys.exit(1)
+            print(f"错误: 未知的清理类型: {clear_type}")
+            sys.exit(1)
     elif command == 'rebuild':
         if len(sys.argv) > 2:
             scan_paths = sys.argv[2:]
@@ -422,7 +422,7 @@ if __name__ == '__main__':
         else:
             manager.rebuild_index()
     elif command == 'rebuild-groups':
-        # 重建重复文件组
+        manager.clean_index()
         manager.rebuild_duplicate_groups()
     else:
         print(f"未知命令: {command}")
