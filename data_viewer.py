@@ -615,14 +615,8 @@ class DataViewer:
                 print(f"  {date}: {count} 个文件")
             print(f"=" * 60)
         else:
-            # 默认显示所有统计
-            print(f"\n统计分析")
-            print(f"=" * 60)
-            print("请指定统计方式:")
-            print("  --by-extension    按扩展名统计")
-            print("  --by-size-range   按大小范围统计")
-            print("  --by-date         按日期统计")
-            print(f"=" * 60)
+            # 默认显示数据汇总报告
+            self.show_summary()
 
 
 def main():
@@ -630,7 +624,6 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python data_viewer.py <command> [args]")
         print("\n可用命令:")
-        print("  summary                    - 显示数据汇总")
         print("  groups [options]           - 显示重复文件组列表")
         print("    --top <n>                - 显示前n个组（默认20）")
         print("    --unconfirmed            - 包括未确认哈希值的组")
@@ -643,7 +636,7 @@ def main():
         print("    --all                    - 显示所有已索引文件")
         print("    --hash                   - 显示哈希值")
         print("    --limit <n>              - 限制显示数量")
-        print("  stats <type>               - 统计分析")
+        print("  stats [options]            - 统计分析（无参数时显示数据汇总）")
         print("    --by-extension           - 按扩展名统计")
         print("    --by-size-range          - 按大小范围统计")
         print("    --by-date                - 按日期统计")
@@ -652,10 +645,7 @@ def main():
     viewer = DataViewer()
     command = sys.argv[1]
     
-    if command == 'summary':
-        viewer.show_summary()
-    
-    elif command == 'groups':
+    if command == 'groups':
         count = 20
         hash_only = True
         min_size = None

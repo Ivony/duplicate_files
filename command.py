@@ -55,7 +55,6 @@ class CommandInterface:
         print(f"  index clean full        - 清除所有数据，删除files表和file_hash表中的所有数据")
         
         print(f"\nshow 指令:")
-        print(f"  show summary              - 显示数据汇总（文件总数、重复组数、可释放空间等）")
         print(f"  show groups [options]     - 显示重复文件组列表")
         print(f"    options:")
         print(f"      --top N               - 显示最大的N个组（默认20）")
@@ -73,7 +72,7 @@ class CommandInterface:
         print(f"                                --hash      显示哈希状态和哈希值")
         print(f"                                --limit N   限制显示数量（默认100）")
         print(f"  show hash <hash>          - 显示指定哈希值的所有文件")
-        print(f"  show stats [options]      - 显示统计分析")
+        print(f"  show stats [options]      - 显示统计分析（无参数时显示数据汇总）")
         print(f"    options:")
         print(f"      --by-extension        - 按扩展名统计")
         print(f"      --by-size-range       - 按大小范围统计")
@@ -146,11 +145,10 @@ class CommandInterface:
                 'description': '显示数据指令',
                 'usage': 'show <子命令> [选项]',
                 'subcommands': {
-                    'summary': '显示数据汇总（文件总数、重复组数、可释放空间等）',
                     'groups [options]': '显示重复文件组列表（使用 --detail <id> 查看组详情）',
                     'files <pattern|path> [options]': '查询文件（支持路径或模式）',
                     'hash <hash>': '显示指定哈希值的所有文件',
-                    'stats [options]': '显示统计分析'
+                    'stats [options]': '显示统计分析（无参数时显示数据汇总）'
                 },
                 'files_options': {
                     '--all': '显示所有文件（包括非重复）',
@@ -405,25 +403,7 @@ class CommandInterface:
         
         subcommand = args[0]
         
-        if subcommand == 'summary':
-            # 显示数据汇总
-            stats = self.analyzer.get_statistics(hash_only=False)
-            
-            print(f"\n数据汇总报告")
-            print(f"=" * 60)
-            print(f"总文件数: {stats['total_files']:,}")
-            print(f"重复文件组数: {stats['duplicate_groups']:,}")
-            print(f"重复文件关联数: {stats['duplicate_files']:,}")
-            print(f"已计算哈希的文件数: {stats['hashed_files']:,}")
-            print(f"待计算哈希的文件数: {stats['unhashed_files']:,}")
-            print(f"总文件大小: {stats['total_size']:,} 字节 ({stats['total_size']/1024/1024/1024:.2f} GB)")
-            print(f"重复文件总大小: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
-            print(f"\n如果删除重复文件:")
-            print(f"  可以删除 {stats['duplicate_files'] - stats['duplicate_groups']} 个文件")
-            print(f"  可以节省磁盘空间: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
-            print(f"=" * 60)
-            
-        elif subcommand == 'groups':
+        if subcommand == 'groups':
             # 显示重复文件组列表或指定组的详细信息
             count = 20
             hash_only = True
@@ -698,13 +678,21 @@ class CommandInterface:
                     print(f"  {date}: {count} 个组")
                 print(f"=" * 60)
             else:
-                # 默认显示所有统计
-                print(f"\n统计分析")
+                # 默认显示数据汇总报告
+                stats = self.analyzer.get_statistics(hash_only=False)
+                
+                print(f"\n数据汇总报告")
                 print(f"=" * 60)
-                print("请指定统计方式:")
-                print("  --by-extension    按扩展名统计")
-                print("  --by-size-range   按大小范围统计")
-                print("  --by-date         按日期统计")
+                print(f"总文件数: {stats['total_files']:,}")
+                print(f"重复文件组数: {stats['duplicate_groups']:,}")
+                print(f"重复文件关联数: {stats['duplicate_files']:,}")
+                print(f"已计算哈希的文件数: {stats['hashed_files']:,}")
+                print(f"待计算哈希的文件数: {stats['unhashed_files']:,}")
+                print(f"总文件大小: {stats['total_size']:,} 字节 ({stats['total_size']/1024/1024/1024:.2f} GB)")
+                print(f"重复文件总大小: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
+                print(f"\n如果删除重复文件:")
+                print(f"  可以删除 {stats['duplicate_files'] - stats['duplicate_groups']} 个文件")
+                print(f"  可以节省磁盘空间: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
                 print(f"=" * 60)
                 
         else:
