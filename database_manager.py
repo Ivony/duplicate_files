@@ -346,10 +346,12 @@ if __name__ == '__main__':
         print("  init [--force]       - 初始化数据库结构（--force 强制重建，不询问）")
         print("  check                - 检查数据库结构和数据")
         print("  optimize             - 优化数据库性能")
-        print("  backup <path>        - 备份整个数据库")
-        print("  restore <path>       - 从备份恢复整个数据库")
-        print("  backup-hash <path>   - 备份file_hash表到CSV（.csv格式）")
-        print("  restore-hash <path> [--merge] - 从CSV还原file_hash表")
+        print("  backup <path> [--hash-only]  - 备份数据库")
+        print("                         默认: 备份整个数据库(.db)")
+        print("                         --hash-only: 只备份file_hash表(.csv)")
+        print("  restore <path> [--hash-only] [--merge]  - 恢复数据库")
+        print("                         默认: 恢复整个数据库")
+        print("                         --hash-only: 只恢复file_hash表")
         print("                         --merge: 合并模式（保留现有数据）")
         print("  status               - 查看索引状态")
         print("  list <path>          - 列举指定路径的索引文件")
@@ -368,27 +370,25 @@ if __name__ == '__main__':
         if len(sys.argv) < 3:
             print("错误: 请指定备份路径")
             sys.exit(1)
-        manager.backup_database(sys.argv[2])
+        backup_path = sys.argv[2]
+        hash_only = '--hash-only' in sys.argv
+        if hash_only:
+            if not backup_path.endswith('.csv'):
+                backup_path += '.csv'
+            manager.backup_file_hash(backup_path)
+        else:
+            manager.backup_database(backup_path)
     elif command == 'restore':
         if len(sys.argv) < 3:
             print("错误: 请指定备份文件路径")
             sys.exit(1)
-        manager.restore_database(sys.argv[2])
-    elif command == 'backup-hash':
-        if len(sys.argv) < 3:
-            print("错误: 请指定备份文件路径（.csv格式）")
-            sys.exit(1)
         backup_path = sys.argv[2]
-        if not backup_path.endswith('.csv'):
-            backup_path += '.csv'
-        manager.backup_file_hash(backup_path)
-    elif command == 'restore-hash':
-        if len(sys.argv) < 3:
-            print("错误: 请指定备份文件路径")
-            sys.exit(1)
-        backup_path = sys.argv[2]
-        merge = '--merge' in sys.argv
-        manager.restore_file_hash(backup_path, merge=merge)
+        hash_only = '--hash-only' in sys.argv
+        if hash_only:
+            merge = '--merge' in sys.argv
+            manager.restore_file_hash(backup_path, merge=merge)
+        else:
+            manager.restore_database(backup_path)
     elif command == 'status':
         manager.get_index_status()
     elif command == 'list':
