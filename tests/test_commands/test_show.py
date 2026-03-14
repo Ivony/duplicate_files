@@ -52,4 +52,4 @@ class TestShowCommand:
         
         # 验证输出
         captured = capsys.readouterr()
-        assert '数据汇总报告' in captured.out
+        assert '文件统计信息' in captured.out
