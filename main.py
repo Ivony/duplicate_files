@@ -1,6 +1,6 @@
 import typer
 from typing import Optional
-from commands import index, show, export, config, db, clean
+from commands import index, show, export, config, db, clean, hash as hash_cmd
 import inspect
 from typer.models import ArgumentInfo, OptionInfo
 
@@ -9,6 +9,7 @@ app = typer.Typer()
 # 注册子命令
 app.add_typer(index.app, name="index", help="扫描与索引指令")
 app.add_typer(show.app, name="show", help="显示数据指令")
+app.add_typer(hash_cmd.app, name="hash", help="哈希计算指令")
 app.add_typer(export.app, name="export", help="导出指令")
 app.add_typer(config.app, name="config", help="配置指令")
 app.add_typer(db.app, name="db", help="数据库指令")

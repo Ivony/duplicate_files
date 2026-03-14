@@ -1265,45 +1265,6 @@ def rebuild():
     _rebuild_duplicate_groups()
 
 @app.command()
-def hash(
-    group_id: Optional[str] = None,
-    new: bool = False,
-    force: bool = False,
-    verify: bool = False,
-    unconfirmed: bool = False,
-    extension: Optional[str] = None,
-    size: Optional[str] = None
-):
-    """计算指定组或所有组的hash值"""
-    mode = 'default'
-    group_ids = None
-    filters = {}
-    
-    if new:
-        mode = 'new'
-    elif force:
-        mode = 'force'
-    elif verify:
-        mode = 'verify'
-    
-    if unconfirmed:
-        filters['unconfirmed'] = True
-    if extension:
-        filters['extension'] = extension
-    if size:
-        filters['size'] = size
-    
-    if group_id:
-        try:
-            group_ids = [int(gid) for gid in group_id.split(',')]
-        except ValueError:
-            typer.echo(f"错误: 无效的组ID: {group_id}")
-            return
-    
-    calculator = HashCalculator('file_index.db')
-    calculator.calculate_hash(mode, group_ids, filters)
-
-@app.command()
 def clear(
     type: str = typer.Argument(..., help="清理类型: files, hash, full")
 ):
