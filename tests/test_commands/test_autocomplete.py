@@ -1,7 +1,144 @@
 import pytest
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.document import Document
-from main import app
+from main import app, TyperCompleter
+
+
+class TestTyperCompleter:
+    """测试上下文感知的Typer补全器"""
+    
+    def test_empty_input_shows_root_commands(self):
+        """测试空输入时显示所有根命令"""
+        completer = TyperCompleter(app)
+        
+        document = Document('', 0)
+        result = list(completer.get_completions(document, None))
+        
+        # 应该包含所有根命令
+        result_texts = [c.text for c in result]
+        assert 'index' in result_texts
+        assert 'show' in result_texts
+        assert 'hash' in result_texts
+        assert 'export' in result_texts
+        assert 'config' in result_texts
+        assert 'db' in result_texts
+        assert 'clean' in result_texts
+        # 也应该包含独立命令
+        assert 'version' in result_texts
+        assert 'help' in result_texts
+    
+    def test_root_command_prefix_completion(self):
+        """测试根命令前缀补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'i' 应该补全为 'index'
+        document = Document('i', 1)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        assert 'index' in result_texts
+        assert 'show' not in result_texts  # 不应该显示不匹配的命令
+    
+    def test_subcommand_completion_after_root(self):
+        """测试在根命令后补全子命令 - 关键测试用例"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'index s' 应该补全为 'scan' 而不是 'show'
+        document = Document('index s', 7)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该包含匹配 's' 的 index 子命令
+        assert 'scan' in result_texts
+        # 不应该包含其他根命令的子命令
+        assert 'groups' not in result_texts  # show的子命令
+        assert 'files' not in result_texts   # show的子命令
+    
+    def test_subcommand_completion_show_group(self):
+        """测试show命令组的子命令补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'show g' 应该补全为 'groups'
+        document = Document('show g', 6)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该包含匹配 'g' 的 show 子命令
+        assert 'groups' in result_texts
+        # 不应该包含 index 的子命令
+        assert 'scan' not in result_texts
+    
+    def test_subcommand_completion_hash_group(self):
+        """测试hash命令组的子命令补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'hash c' 应该补全为 'calc'
+        document = Document('hash c', 6)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        assert 'calc' in result_texts
+        assert 'clear' in result_texts
+        # 不应该包含其他命令
+        assert 'scan' not in result_texts
+        assert 'groups' not in result_texts
+    
+    def test_unknown_root_command_fallback(self):
+        """测试未知根命令时的回退行为"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'unknown s' - 未知根命令，没有匹配的补全
+        document = Document('unknown s', 9)
+        result = list(completer.get_completions(document, None))
+        
+        # 未知命令没有匹配的补全，返回空列表
+        assert len(result) == 0
+    
+    def test_case_insensitive_subcommand(self):
+        """测试子命令大小写不敏感"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'INDEX S' 应该也能补全
+        document = Document('INDEX S', 7)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        assert 'scan' in result_texts
+    
+    def test_complete_subcommand_no_duplicates(self):
+        """测试完整子命令不产生重复"""
+        completer = TyperCompleter(app)
+        
+        # 输入完整的 'index scan'
+        document = Document('index scan', 10)
+        result = list(completer.get_completions(document, None))
+        
+        # 完全匹配时不应该显示该子命令作为候选项
+        assert len(result) == 0
+        
+        # 输入完整的 'show groups'
+        document = Document('show groups', 11)
+        result = list(completer.get_completions(document, None))
+        assert len(result) == 0
+        
+        # 输入完整的 'hash calc'
+        document = Document('hash calc', 9)
+        result = list(completer.get_completions(document, None))
+        assert len(result) == 0
+    
+    def test_multiple_subcommands_suggestions(self):
+        """测试多个子命令建议"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'index ' (注意空格，当前词为空)
+        document = Document('index ', 6)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该显示所有 index 的子命令（空字符串匹配所有）
+        assert 'scan' in result_texts
+        assert 'rebuild' in result_texts
+        assert 'clear' in result_texts
+
 
 class TestAutocomplete:
     """测试命令行自动补全功能"""

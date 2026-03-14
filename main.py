@@ -64,6 +64,116 @@ def help(command: Optional[str] = None):
         typer.echo("使用 'help <命令>' 查看特定命令的详细帮助")
         typer.echo("=" * 60)
 
+from prompt_toolkit.completion import Completer, Completion
+
+
+class TyperCompleter(Completer):
+    """基于Typer应用元数据的上下文感知补全器"""
+    
+    def __init__(self, app):
+        self.app = app
+        # 从Typer应用提取命令结构
+        self.root_commands = {}  # 根命令 -> 子命令列表
+        self.standalone_commands = []  # 独立命令（如version, help）
+        
+        # 提取所有命令结构
+        self._extract_commands()
+    
+    def _extract_commands(self):
+        """从Typer应用提取命令元数据"""
+        # 提取分组命令（如 index, show, hash等）
+        for group_info in self.app.registered_groups:
+            group_name = group_info.name
+            sub_app = group_info.typer_instance
+            
+            subcommands = []
+            for cmd_info in sub_app.registered_commands:
+                if cmd_info.callback:
+                    cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                    subcommands.append(cmd_name)
+            
+            self.root_commands[group_name] = subcommands
+        
+        # 提取独立命令（如version, help）
+        for cmd_info in self.app.registered_commands:
+            if cmd_info.callback:
+                cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                self.standalone_commands.append(cmd_name)
+    
+    def get_completions(self, document, complete_event):
+        """根据当前输入上下文提供补全建议"""
+        
+        text = document.text_before_cursor
+        stripped_text = text.strip()
+        words = stripped_text.split()
+        
+        # 检查是否以空格结尾（表示正在输入子命令）
+        ends_with_space = text.endswith(' ') or text.endswith('\t')
+        
+        if not words:
+            # 空输入：显示所有根命令和独立命令
+            for cmd in self.root_commands.keys():
+                yield Completion(cmd, start_position=0)
+            for cmd in self.standalone_commands:
+                yield Completion(cmd, start_position=0)
+        
+        elif len(words) == 1 and not ends_with_space:
+            # 输入一个词且不以空格结尾：可能是根命令或独立命令的一部分
+            current_word = words[0].lower()
+            
+            # 匹配根命令
+            for cmd in self.root_commands.keys():
+                if cmd.lower().startswith(current_word):
+                    yield Completion(cmd, start_position=-len(words[0]))
+            
+            # 匹配独立命令
+            for cmd in self.standalone_commands:
+                if cmd.lower().startswith(current_word):
+                    yield Completion(cmd, start_position=-len(words[0]))
+        
+        elif len(words) == 1 and ends_with_space:
+            # 输入一个词且以空格结尾：正在输入该命令的子命令
+            root_cmd = words[0].lower()
+            
+            # 检查是否是已知的根命令
+            matched_root = None
+            for cmd in self.root_commands.keys():
+                if cmd.lower() == root_cmd:
+                    matched_root = cmd
+                    break
+            
+            if matched_root:
+                # 显示该根命令下的所有子命令
+                subcommands = self.root_commands[matched_root]
+                for subcmd in subcommands:
+                    yield Completion(subcmd, start_position=0)
+        
+        else:
+            # 输入多个词：第一个词是根命令，后续是子命令
+            root_cmd = words[0].lower()
+            current_word = words[-1].lower()
+            
+            # 检查是否是已知的根命令
+            matched_root = None
+            for cmd in self.root_commands.keys():
+                if cmd.lower() == root_cmd:
+                    matched_root = cmd
+                    break
+            
+            if matched_root:
+                # 提供该根命令下的子命令补全
+                subcommands = self.root_commands[matched_root]
+                for subcmd in subcommands:
+                    # 只显示前缀匹配且不是完全匹配的子命令
+                    if subcmd.lower().startswith(current_word) and subcmd.lower() != current_word:
+                        yield Completion(subcmd, start_position=-len(words[-1]))
+            else:
+                # 不是已知的根命令，回退到根命令补全
+                for cmd in self.root_commands.keys():
+                    if cmd.lower().startswith(root_cmd):
+                        yield Completion(cmd, start_position=-len(words[0]))
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) == 1:
@@ -73,24 +183,8 @@ if __name__ == "__main__":
         from prompt_toolkit.history import FileHistory
         import io
         
-        # 创建简单的命令补全器
-        from prompt_toolkit.completion import WordCompleter
-        
-        all_commands = []
-        for group_info in app.registered_groups:
-            all_commands.append(group_info.name)
-            sub_app = group_info.typer_instance
-            for cmd_info in sub_app.registered_commands:
-                if cmd_info.callback:
-                    cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
-                    all_commands.append(f"{group_info.name} {cmd_name}")
-        
-        for cmd_info in app.registered_commands:
-            if cmd_info.callback:
-                cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
-                all_commands.append(cmd_name)
-        
-        completer = WordCompleter(all_commands, ignore_case=True)
+        # 创建上下文感知的补全器
+        completer = TyperCompleter(app)
         
         # 定义样式
         style = Style.from_dict({
