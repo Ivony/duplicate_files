@@ -169,29 +169,22 @@ class TyperCompleter(Completer):
                     
                     # 处理路径前缀：如果输入包含路径前缀（如C:\），确保补全结果包含完整路径
                     if '\\' in path_part or '/' in path_part:
-                        # 提取路径前缀
-                        if '\\' in path_part:
-                            # 对于 Windows 路径，处理反斜杠
-                            if path_part.count('\\') > 0:
-                                # 提取最后一个反斜杠之前的部分作为前缀
-                                prefix = path_part.rsplit('\\', 1)[0]
-                                # 如果前缀不是空的，添加反斜杠
-                                if prefix:
-                                    prefix += '\\'
-                            else:
-                                # 只有一个反斜杠的情况（如 C:\）
-                                prefix = path_part
+                        # 找到最后一个路径分隔符的位置（无论是 \ 还是 /）
+                        last_backslash = path_part.rfind('\\')
+                        last_slash = path_part.rfind('/')
+                        last_sep_pos = max(last_backslash, last_slash)
+                        
+                        if last_sep_pos > 0:
+                            # 提取最后一个分隔符之前的部分作为前缀
+                            prefix = path_part[:last_sep_pos]
+                            # 使用原始分隔符
+                            separator = path_part[last_sep_pos]
+                            prefix += separator
+                        elif last_sep_pos == 0:
+                            # 分隔符在开头（如 \ 或 /）
+                            prefix = path_part[0]
                         else:
-                            # 对于 Unix 风格路径
-                            if path_part.count('/') > 0:
-                                # 提取最后一个斜杠之前的部分作为前缀
-                                prefix = path_part.rsplit('/', 1)[0]
-                                # 如果前缀不是空的，添加斜杠
-                                if prefix:
-                                    prefix += '/'
-                            else:
-                                # 只有一个斜杠的情况
-                                prefix = path_part
+                            prefix = ''
                         
                         # 组合完整路径
                         complete_text = prefix + complete_text
@@ -255,29 +248,22 @@ class TyperCompleter(Completer):
                     
                     # 处理路径前缀：如果输入包含路径前缀（如C:\），确保补全结果包含完整路径
                     if '\\' in path_part or '/' in path_part:
-                        # 提取路径前缀
-                        if '\\' in path_part:
-                            # 对于 Windows 路径，处理反斜杠
-                            if path_part.count('\\') > 0:
-                                # 提取最后一个反斜杠之前的部分作为前缀
-                                prefix = path_part.rsplit('\\', 1)[0]
-                                # 如果前缀不是空的，添加反斜杠
-                                if prefix:
-                                    prefix += '\\'
-                            else:
-                                # 只有一个反斜杠的情况（如 C:\）
-                                prefix = path_part
+                        # 找到最后一个路径分隔符的位置（无论是 \ 还是 /）
+                        last_backslash = path_part.rfind('\\')
+                        last_slash = path_part.rfind('/')
+                        last_sep_pos = max(last_backslash, last_slash)
+                        
+                        if last_sep_pos > 0:
+                            # 提取最后一个分隔符之前的部分作为前缀
+                            prefix = path_part[:last_sep_pos]
+                            # 使用原始分隔符
+                            separator = path_part[last_sep_pos]
+                            prefix += separator
+                        elif last_sep_pos == 0:
+                            # 分隔符在开头（如 \ 或 /）
+                            prefix = path_part[0]
                         else:
-                            # 对于 Unix 风格路径
-                            if path_part.count('/') > 0:
-                                # 提取最后一个斜杠之前的部分作为前缀
-                                prefix = path_part.rsplit('/', 1)[0]
-                                # 如果前缀不是空的，添加斜杠
-                                if prefix:
-                                    prefix += '/'
-                            else:
-                                # 只有一个斜杠的情况
-                                prefix = path_part
+                            prefix = ''
                         
                         # 组合完整路径
                         complete_text = prefix + complete_text

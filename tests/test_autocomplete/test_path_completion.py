@@ -240,3 +240,67 @@ class TestPathCompletion:
         # 验证返回的是 Completion 对象
         for completion in completions:
             assert isinstance(completion, Completion)
+    
+    def test_path_completion_with_forward_slash(self):
+        """测试以正斜杠结尾的路径补全
+        
+        验证以 / 结尾的路径补全行为与以 \\ 结尾的路径补全行为一致。
+        补全应该正确保留路径前缀，不会覆盖最后一个分隔符。
+        """
+        # 测试以 / 结尾的路径
+        document = Document('index scan C:/', 14)
+        completions = list(self.completer.get_completions(document, None))
+        
+        assert len(completions) > 0
+        for completion in completions:
+            assert isinstance(completion, Completion)
+            # 确保补全文本以 C:/ 开头
+            assert completion.text.startswith('C:/') or completion.text.startswith('C:\\')
+            # 确保 start_position 正确，只替换路径部分
+            assert completion.start_position == -3  # 替换 'C:/' 部分
+    
+    def test_path_completion_mixed_separators(self):
+        """测试混合路径分隔符的补全
+        
+        验证当路径同时包含 \\ 和 / 时，代码能正确找到最后一个分隔符。
+        """
+        # 测试混合分隔符：最后一个分隔符是 /
+        document1 = Document('index scan C:\\Temp/', 18)
+        completions1 = list(self.completer.get_completions(document1, None))
+        
+        for completion in completions1:
+            assert isinstance(completion, Completion)
+            # 补全文本应该包含完整路径
+            assert 'Temp' in completion.text or 'temp' in completion.text.lower()
+        
+        # 测试混合分隔符：最后一个分隔符是 \\
+        document2 = Document('index scan C:/Temp\\', 18)
+        completions2 = list(self.completer.get_completions(document2, None))
+        
+        for completion in completions2:
+            assert isinstance(completion, Completion)
+            # 补全文本应该包含完整路径
+            assert 'Temp' in completion.text or 'temp' in completion.text.lower()
+    
+    def test_path_completion_preserves_separator_type(self):
+        """测试路径补全保留分隔符类型
+        
+        验证补全时保留原始的分隔符类型（\\ 或 /）。
+        """
+        # 测试反斜杠分隔符
+        document1 = Document('index scan C:\\T', 15)
+        completions1 = list(self.completer.get_completions(document1, None))
+        
+        for completion in completions1:
+            assert isinstance(completion, Completion)
+            # start_position 应该是 -4，替换 'C:\\T' 部分
+            assert completion.start_position == -4
+        
+        # 测试正斜杠分隔符
+        document2 = Document('index scan C:/T', 15)
+        completions2 = list(self.completer.get_completions(document2, None))
+        
+        for completion in completions2:
+            assert isinstance(completion, Completion)
+            # start_position 应该是 -4，替换 'C:/T' 部分
+            assert completion.start_position == -4

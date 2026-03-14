@@ -153,6 +153,18 @@ python tests/test_autocomplete/debug/debug_path_fix.py
 - `test_path_completion_requires_separator` - 测试路径补全需要路径分隔符
 - `test_path_completion_with_partial_input` - 测试不带分隔符时不触发补全
 
+### 问题：正斜杠路径补全行为错误
+**描述**：以 `\` 结尾的路径补全行为正常，但以 `/` 结尾的路径补全会覆盖最后一个 `\` 字符。
+
+**原因**：代码使用 `if '\\' in path_part` 和 `else` 分支，当路径同时包含 `\` 和 `/` 时，只会处理 `\` 的情况，忽略了最后的 `/`。
+
+**解决方案**：修改逻辑，找到最后一个路径分隔符（无论是 `\` 还是 `/`）来提取前缀，使用 `rfind()` 找到两种分隔符的最后位置。
+
+**相关测试**：
+- `test_path_completion_with_forward_slash` - 测试以正斜杠结尾的路径补全
+- `test_path_completion_mixed_separators` - 测试混合路径分隔符的补全
+- `test_path_completion_preserves_separator_type` - 测试路径补全保留分隔符类型
+
 ## 测试数据
 
 ### 根命令列表
