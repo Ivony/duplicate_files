@@ -71,11 +71,26 @@ if __name__ == "__main__":
         from prompt_toolkit import PromptSession
         from prompt_toolkit.styles import Style
         from prompt_toolkit.history import FileHistory
-        from prompt_toolkit.contrib.typer import TyperCompleter
         import io
         
-        # 创建 Typer 补全器
-        completer = TyperCompleter(app)
+        # 创建简单的命令补全器
+        from prompt_toolkit.completion import WordCompleter
+        
+        all_commands = []
+        for group_info in app.registered_groups:
+            all_commands.append(group_info.name)
+            sub_app = group_info.typer_instance
+            for cmd_info in sub_app.registered_commands:
+                if cmd_info.callback:
+                    cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                    all_commands.append(f"{group_info.name} {cmd_name}")
+        
+        for cmd_info in app.registered_commands:
+            if cmd_info.callback:
+                cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                all_commands.append(cmd_name)
+        
+        completer = WordCompleter(all_commands, ignore_case=True)
         
         # 定义样式
         style = Style.from_dict({
@@ -141,9 +156,105 @@ if __name__ == "__main__":
             text = text.replace("Try ' --help", "Try 'help'")
             return text
         
+        def extract_typer_metadata():
+            """从Typer应用中提取元数据"""
+            metadata = {}
+            
+            for group_info in app.registered_groups:
+                group_name = group_info.name
+                group_help = group_info.help or ''
+                
+                metadata[group_name] = {
+                    'name': group_name,
+                    'help': group_help,
+                    'subcommands': {}
+                }
+                
+                sub_app = group_info.typer_instance
+                for cmd_info in sub_app.registered_commands:
+                    if cmd_info.callback:
+                        cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                        cmd_doc = cmd_info.callback.__doc__ or ''
+                        
+                        metadata[group_name]['subcommands'][cmd_name] = {
+                            'name': cmd_name,
+                            'help': cmd_doc.strip()
+                        }
+            
+            return metadata
+        
+        def show_interactive_help(command_name=None):
+            """显示交互式模式的帮助信息（从Typer元数据动态生成）"""
+            metadata = extract_typer_metadata()
+            
+            if command_name is None:
+                print("\n重复文件分析工具 - 交互式帮助")
+                print("=" * 80)
+                print("\n可用命令:")
+                print("-" * 80)
+                
+                for group_name, group_data in sorted(metadata.items()):
+                    print(f"\n  {group_name:<12} - {group_data['help']}")
+                    for cmd_name, cmd_data in sorted(group_data['subcommands'].items()):
+                        print(f"    {cmd_name}")
+                
+                for cmd_info in app.registered_commands:
+                    if cmd_info.callback:
+                        cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                        cmd_doc = cmd_info.callback.__doc__ or ''
+                        print(f"\n  {cmd_name:<12} - {cmd_doc.strip()}")
+                
+                print("\n" + "-" * 80)
+                print("使用 'help <命令>' 查看特定命令的详细帮助")
+                print("使用 Tab 键自动补全命令和参数")
+                print("使用 ↑ ↓ 键浏览历史命令")
+                print("=" * 80 + "\n")
+            else:
+                command_name = command_name.lower()
+                
+                if command_name in metadata:
+                    group_data = metadata[command_name]
+                    print(f"\n命令: {command_name}")
+                    print("=" * 80)
+                    print(f"描述: {group_data['help']}")
+                    print(f"用法: {command_name} <子命令> [参数]")
+                    print("\n子命令:")
+                    print("-" * 80)
+                    for cmd_name, cmd_data in sorted(group_data['subcommands'].items()):
+                        print(f"  {cmd_name:<30} - {cmd_data['help']}")
+                    
+                    examples = []
+                    for cmd_name in sorted(group_data['subcommands'].keys()):
+                        examples.append(f"{command_name} {cmd_name}")
+                    
+                    print("\n示例:")
+                    print("-" * 80)
+                    for example in examples[:5]:
+                        print(f"  {example}")
+                    if len(examples) > 5:
+                        print(f"  ... 还有 {len(examples) - 5} 个子命令")
+                    print("=" * 80 + "\n")
+                else:
+                    found = False
+                    for cmd_info in app.registered_commands:
+                        if cmd_info.callback:
+                            cmd_name = cmd_info.name or getattr(cmd_info.callback, '__name__', 'unknown')
+                            if cmd_name == command_name:
+                                found = True
+                                cmd_doc = cmd_info.callback.__doc__ or ''
+                                print(f"\n命令: {command_name}")
+                                print("=" * 80)
+                                print(f"描述: {cmd_doc.strip()}")
+                                print(f"用法: {command_name}")
+                                print("=" * 80 + "\n")
+                                break
+                    
+                    if not found:
+                        print(f"\n错误: 未找到命令 '{command_name}'")
+                        print("使用 'help' 查看所有可用命令\n")
+        
         while True:
             try:
-                # 获取用户输入
                 command = session.prompt('> ')
                 command = command.strip()
                 
@@ -154,60 +265,17 @@ if __name__ == "__main__":
                     print("感谢使用重复文件分析工具！")
                     break
                 
-                # 执行命令
-                # 特殊处理 help 命令，避免递归调用
                 if command == 'help':
-                    # 直接显示帮助信息
-                    print("重复文件分析工具")
-                    print("=" * 60)
-                    print("可用命令:")
-                    print("=" * 60)
-                    print()
-                    
-                    # 直接在当前进程中执行help命令
-                    stdout, stderr = execute_command(['help'])
-                    if stdout:
-                        # 跳过前几行，只显示命令列表部分
-                        lines = fix_help_text(stdout).split('\n')
-                        start_printing = False
-                        for line in lines:
-                            if '可用命令:' in line:
-                                start_printing = True
-                            elif start_printing:
-                                print(line)
+                    show_interactive_help()
                 elif command.startswith('help '):
-                    # 处理 help <命令> 格式
-                    cmd_parts = command.split()
+                    cmd_parts = command.split(maxsplit=1)
                     if len(cmd_parts) > 1:
-                        cmd = cmd_parts[1]
-                        stdout, stderr = execute_command([cmd, '--help'])
-                        if stdout:
-                            print(fix_help_text(stdout))
-                        if stderr:
-                            print(fix_help_text(stderr), file=sys.stderr)
+                        show_interactive_help(cmd_parts[1])
                     else:
-                        # 与上面相同的帮助信息
-                        print("重复文件分析工具")
-                        print("=" * 60)
-                        print("可用命令:")
-                        print("=" * 60)
-                        print()
-                        
-                        stdout, stderr = execute_command(['help'])
-                        if stdout:
-                            # 跳过前几行，只显示命令列表部分
-                            lines = fix_help_text(stdout).split('\n')
-                            start_printing = False
-                            for line in lines:
-                                if '可用命令:' in line:
-                                    start_printing = True
-                                elif start_printing:
-                                    print(line)
+                        show_interactive_help()
                 else:
-                    # 执行其他命令
                     stdout, stderr = execute_command(command.split())
                     
-                    # 显示输出
                     if stdout:
                         print(fix_help_text(stdout))
                     if stderr:
