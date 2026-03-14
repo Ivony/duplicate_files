@@ -4,8 +4,6 @@ import os
 from typing import Optional
 from datetime import datetime
 from rich.console import Console
-from rich.table import Table
-from rich import box
 from commands.db import get_db_path
 
 class DataViewer:
@@ -892,210 +890,162 @@ def stats(
         else:
             return f"[bold]{size} B[/bold]"
     
+    def print_progress_bar(progress, width=30):
+        filled = int(progress / 100 * width)
+        return f"[green]{'█' * filled}[/green][dim]{'░' * (width - filled)}[/dim]"
+    
     if by_extension:
         stats = analyzer.get_stats_by_extension()
-        table = Table(title="📊 按扩展名统计", box=box.ROUNDED)
-        table.add_column("扩展名", style="cyan", no_wrap=True)
-        table.add_column("组数", style="magenta", justify="right")
+        console.print()
+        console.print("[bold blue]📊 按扩展名统计[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
         for ext, count in sorted(stats.items(), key=lambda x: x[1], reverse=True):
-            table.add_row(ext or "(无扩展名)", str(count))
-        console.print(table)
+            console.print(f"  {ext or '(无扩展名)':<15} [bold green]{count:,}[/bold green] 个组")
+        console.print()
     elif by_size_range:
         stats = analyzer.get_stats_by_size_range()
-        table = Table(title="📊 按大小范围统计", box=box.ROUNDED)
-        table.add_column("大小范围", style="cyan", no_wrap=True)
-        table.add_column("组数", style="magenta", justify="right")
+        console.print()
+        console.print("[bold blue]📊 按大小范围统计[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
         size_order = ['< 1MB', '1MB - 10MB', '10MB - 100MB', '100MB - 1GB', '> 1GB']
         for range_name in size_order:
             if range_name in stats:
-                table.add_row(range_name, str(stats[range_name]))
-        console.print(table)
+                console.print(f"  {range_name:<15} [bold green]{stats[range_name]:,}[/bold green] 个组")
+        console.print()
     elif by_date:
         stats = analyzer.get_stats_by_date()
-        table = Table(title="📊 按日期统计", box=box.ROUNDED)
-        table.add_column("日期", style="cyan", no_wrap=True)
-        table.add_column("组数", style="magenta", justify="right")
+        console.print()
+        console.print("[bold blue]📊 按日期统计[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
         for date, count in stats.items():
-            table.add_row(date, str(count))
-        console.print(table)
+            console.print(f"  {date:<15} [bold green]{count:,}[/bold green] 个组")
+        console.print()
     else:
         stats = analyzer.get_statistics(hash_only=True)
         
         console.print()
         
         # ═══════════════════════════════════════════════════════════════════════════
-        # 文件统计信息表格
+        # 文件统计信息
         # ═══════════════════════════════════════════════════════════════════════════
         
-        file_table = Table(box=box.ROUNDED, expand=True, show_header=False, padding=(0, 1))
-        file_table.add_column("col1", ratio=1)
-        file_table.add_column("col2", ratio=1)
+        console.print("[bold blue]📄 文件统计信息[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  扫描文件数          [bold]{stats['total_files']:,}[/bold]")
+        console.print(f"  文件总大小          {format_size_colored(stats['total_size'])}")
+        console.print(f"  已计算哈希文件      [bold green]{stats['hashed_files']:,}[/bold green]")
+        console.print(f"  待计算哈希文件      [bold yellow]{stats['unhashed_files']:,}[/bold yellow]")
+        console.print()
         
-        file_table.add_row(
-            "[bold blue]📄 文件统计信息[/bold blue]",
-            ""
-        )
-        
-        file_left = Table(box=None, show_header=False, padding=(0, 2))
-        file_left.add_column("item", style="cyan", width=18)
-        file_left.add_column("value", style="white", width=20)
-        file_left.add_row("扫描文件数", f"[bold]{stats['total_files']:,}[/bold]")
-        file_left.add_row("文件总大小", format_size_colored(stats['total_size']))
-        file_left.add_row("已计算哈希文件", f"[bold green]{stats['hashed_files']:,}[/bold green]")
-        file_left.add_row("待计算哈希文件", f"[bold yellow]{stats['unhashed_files']:,}[/bold yellow]")
-        
-        file_right = Table(box=None, show_header=False, padding=(0, 2))
-        file_right.add_column("item", style="cyan", width=18)
-        file_right.add_column("value", style="white", width=20)
+        # 磁盘分布
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print("  💿 磁盘分布")
         if stats['disk_distribution']:
-            for disk, info in list(stats['disk_distribution'].items())[:4]:
-                file_right.add_row(f"磁盘 {disk}", f"{info['file_count']:,} 个文件")
+            for disk, info in stats['disk_distribution'].items():
+                console.print(f"    {disk}    {info['file_count']:,} 个文件")
         else:
-            file_right.add_row("磁盘分布", "暂无数据")
+            console.print("    暂无数据")
+        console.print()
         
-        file_table.add_row(file_left, file_right)
-        
-        # 哈希计算进度行
+        # 哈希计算进度
         if stats['duplicate_files_total_size'] > 0:
             hash_progress = stats['hashed_size'] / stats['duplicate_files_total_size'] * 100
         else:
             hash_progress = 0
         
-        progress_bar_width = 30
-        filled = int(hash_progress / 100 * progress_bar_width)
-        bar = f"[green]{'█' * filled}[/green][dim]{'░' * (progress_bar_width - filled)}[/dim]"
-        
-        file_table.add_row(
-            f"[cyan]哈希计算进度[/cyan]: 已计算 {format_size(stats['hashed_size'])} / {format_size(stats['duplicate_files_total_size'])}    {bar} [bold]{hash_progress:.1f}%[/bold]",
-            ""
-        )
-        
-        console.print(file_table)
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print("  ⏳ 哈希计算进度")
+        console.print(f"  已计算 {format_size(stats['hashed_size'])} / {format_size(stats['duplicate_files_total_size'])}")
+        console.print(f"  {print_progress_bar(hash_progress)} [bold]{hash_progress:.1f}%[/bold]")
         console.print()
         
         # ═══════════════════════════════════════════════════════════════════════════
-        # 重复组统计信息表格
+        # 重复组统计信息
         # ═══════════════════════════════════════════════════════════════════════════
-        
-        group_table = Table(box=box.ROUNDED, expand=True, show_header=False, padding=(0, 1))
-        group_table.add_column("col1", ratio=1)
-        group_table.add_column("col2", ratio=1)
-        
-        group_table.add_row(
-            "[bold blue]📁 重复组统计信息[/bold blue]",
-            ""
-        )
         
         total_groups = stats['hashed_groups'] + stats['unhashed_groups']
         duplicate_rate = (stats['duplicate_files'] / stats['total_files'] * 100) if stats['total_files'] > 0 else 0
         deletable_files = stats['duplicate_files'] - stats['hashed_groups']
         
-        group_left = Table(box=None, show_header=False, padding=(0, 2))
-        group_left.add_column("item", style="cyan", width=18)
-        group_left.add_column("value", style="white", width=20)
-        group_left.add_row("重复组总数", f"[bold]{total_groups:,}[/bold]")
-        group_left.add_row("组内文件总数", f"[bold]{stats['duplicate_files']:,}[/bold]")
-        group_left.add_row("已确认组", f"[bold green]{stats['hashed_groups']:,}[/bold green]")
-        group_left.add_row("待确认组", f"[bold yellow]{stats['unhashed_groups']:,}[/bold yellow]")
+        console.print("[bold blue]📁 重复组统计信息[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  重复组总数          [bold]{total_groups:,}[/bold]")
+        console.print(f"  组内文件总数        [bold]{stats['duplicate_files']:,}[/bold]")
+        console.print(f"  已确认组            [bold green]{stats['hashed_groups']:,}[/bold green]")
+        console.print(f"  待确认组            [bold yellow]{stats['unhashed_groups']:,}[/bold yellow]")
+        console.print()
         
-        group_right = Table(box=None, show_header=False, padding=(0, 2))
-        group_right.add_column("item", style="cyan", width=18)
-        group_right.add_column("value", style="white", width=20)
-        group_right.add_row("平均组大小", format_size_colored(stats['avg_group_size']))
-        group_right.add_row("平均组文件数", f"[bold]{stats['avg_duplication']:.2f}[/bold] 个")
+        # 组详情
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print(f"  平均组大小          {format_size_colored(stats['avg_group_size'])}")
+        console.print(f"  平均组文件数        [bold]{stats['avg_duplication']:.2f}[/bold] 个")
         avg_savable = stats['duplicate_size'] / stats['hashed_groups'] if stats['hashed_groups'] > 0 else 0
-        group_right.add_row("平均可释放空间", format_size_colored(avg_savable))
-        group_right.add_row("重复率", f"[bold yellow]{duplicate_rate:.2f}%[/bold yellow]")
+        console.print(f"  平均可释放空间      {format_size_colored(avg_savable)}")
+        console.print(f"  重复率              [bold yellow]{duplicate_rate:.2f}%[/bold yellow]")
+        console.print()
         
-        group_table.add_row(group_left, group_right)
-        
-        # 组确认进度行
+        # 组确认进度
         if total_groups > 0:
             group_progress = stats['hashed_groups'] / total_groups * 100
         else:
             group_progress = 0
         
-        filled = int(group_progress / 100 * progress_bar_width)
-        bar = f"[green]{'█' * filled}[/green][dim]{'░' * (progress_bar_width - filled)}[/dim]"
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print("  ⏳ 组确认进度")
+        console.print(f"  已确认 {stats['hashed_groups']:,} / {total_groups:,} 组")
+        console.print(f"  {print_progress_bar(group_progress)} [bold]{group_progress:.1f}%[/bold]")
+        console.print()
         
-        group_table.add_row(
-            f"[cyan]组确认进度[/cyan]: 已确认 {stats['hashed_groups']:,} / {total_groups:,} 组    {bar} [bold]{group_progress:.1f}%[/bold]",
-            ""
-        )
-        
-        # 可释放空间行
-        group_table.add_row(
-            f"[cyan]💾 可释放空间[/cyan]: 可删除 [bold red]{deletable_files:,}[/bold red] 个文件，节省 [bold green]{format_size(stats['duplicate_size'])}[/bold green]",
-            ""
-        )
-        
-        console.print(group_table)
+        # 可释放空间
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print("  💾 可释放空间")
+        console.print(f"  可删除 [bold red]{deletable_files:,}[/bold red] 个文件，节省 [bold green]{format_size(stats['duplicate_size'])}[/bold green]")
         console.print()
         
         # ═══════════════════════════════════════════════════════════════════════════
-        # 类型和大小分析表格
+        # 类型和大小分析
         # ═══════════════════════════════════════════════════════════════════════════
         
-        analysis_table = Table(box=box.ROUNDED, expand=True, show_header=False, padding=(0, 1))
-        analysis_table.add_column("col1", ratio=1)
-        analysis_table.add_column("col2", ratio=1)
+        console.print("[bold blue]📊 类型和大小分析[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
         
-        analysis_table.add_row(
-            "[bold blue]📊 类型和大小分析[/bold blue]",
-            ""
-        )
-        
-        # 左侧：按扩展名 Top 10
-        ext_inner = Table(box=None, show_header=True, padding=(0, 1))
-        ext_inner.add_column("扩展名", style="cyan", width=10)
-        ext_inner.add_column("组数", style="magenta", justify="right", width=8)
-        ext_inner.add_column("可释放空间", style="green", justify="right", width=12)
-        
+        # 按扩展名 Top 5
+        console.print("  📁 按扩展名 Top 5")
         if stats['top_extensions']:
             for ext_info in stats['top_extensions'][:5]:
-                ext_inner.add_row(
-                    ext_info['extension'][:10],
-                    f"{ext_info['group_count']:,}",
-                    format_size(ext_info['savable_space'])
-                )
+                console.print(f"    {ext_info['extension']:<10} {ext_info['group_count']:>5} 组    可释放 {format_size_colored(ext_info['savable_space'])}")
         else:
-            ext_inner.add_row("暂无数据", "", "")
+            console.print("    暂无数据")
+        console.print()
         
-        # 右侧：按大小分布
-        size_inner = Table(box=None, show_header=True, padding=(0, 1))
-        size_inner.add_column("大小范围", style="cyan", width=12)
-        size_inner.add_column("可释放空间", style="green", justify="right", width=12)
-        
+        # 按大小分布
+        console.print("  [dim]───────────────────────────────────────────────[/dim]")
+        console.print("  📏 按大小分布")
         size_order = ['< 1MB', '1MB - 10MB', '10MB - 100MB', '100MB - 1GB', '> 1GB']
         if stats['size_distribution']:
             for range_name in size_order:
                 if range_name in stats['size_distribution']:
                     info = stats['size_distribution'][range_name]
-                    size_inner.add_row(range_name, format_size(info['savable_space']))
+                    console.print(f"    {range_name:<12} 可释放 {format_size_colored(info['savable_space'])}")
         else:
-            size_inner.add_row("暂无数据", "")
-        
-        analysis_table.add_row(ext_inner, size_inner)
-        
-        console.print(analysis_table)
+            console.print("    暂无数据")
         console.print()
         
         # ═══════════════════════════════════════════════════════════════════════════
-        # 其他信息表格
+        # 其他信息
         # ═══════════════════════════════════════════════════════════════════════════
         
-        other_table = Table(box=box.ROUNDED, expand=True, show_header=False, padding=(0, 1))
-        other_table.add_column("col1", ratio=1)
-        
-        other_table.add_row(
-            "[bold blue]📋 其他信息[/bold blue]",
-        )
-        
-        other_table.add_row(
-            f"数据库大小: {format_size_colored(stats['db_size'])}    跨磁盘重复组: [bold]{stats['cross_disk_groups']:,}[/bold] 个",
-        )
-        
-        console.print(other_table)
+        console.print("[bold blue]📋 其他信息[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  数据库大小: {format_size_colored(stats['db_size'])}      跨磁盘重复组: [bold]{stats['cross_disk_groups']:,}[/bold] 个")
+        console.print()
 
 # 辅助函数
 def _parse_size(size_str: str) -> int:
