@@ -3,7 +3,7 @@ import re
 import json
 import os
 import sqlite3
-from commands.db_config import get_db_path
+from commands.db import get_db_path
 
 class ConfigManager:
     def __init__(self, config_path='config.json', db_path=None):

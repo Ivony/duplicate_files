@@ -2,7 +2,17 @@ import typer
 import os
 import sqlite3
 from datetime import datetime
-from commands.db_config import get_db_path
+
+DB_PATH = 'file_index.db'
+
+def get_db_path():
+    """获取数据库路径"""
+    return DB_PATH
+
+def set_db_path(path):
+    """设置数据库路径（用于测试）"""
+    global DB_PATH
+    DB_PATH = path
 
 class DatabaseManager:
     def __init__(self, db_path=None):

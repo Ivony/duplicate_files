@@ -5,7 +5,7 @@ from datetime import datetime
 import hashlib
 import time
 import mmap
-from commands.db_config import get_db_path
+from commands.db import get_db_path
 
 # 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:

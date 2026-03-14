@@ -78,9 +78,9 @@ def temp_db(tmp_path):
 @pytest.fixture(autouse=True)
 def isolate_db(temp_db, monkeypatch):
     """自动隔离数据库，确保测试不会影响实际数据库"""
-    import commands.db_config
-    monkeypatch.setattr(commands.db_config, 'DB_PATH', temp_db)
-    monkeypatch.setattr(commands.db_config, 'get_db_path', lambda: temp_db)
+    import commands.db
+    monkeypatch.setattr(commands.db, 'DB_PATH', temp_db)
+    monkeypatch.setattr(commands.db, 'get_db_path', lambda: temp_db)
     yield
 
 @pytest.fixture

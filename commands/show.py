@@ -6,7 +6,7 @@ from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich import box
-from commands.db_config import get_db_path
+from commands.db import get_db_path
 
 class DataViewer:
     """数据查看器 - 提供查询和展示重复文件数据的功能"""

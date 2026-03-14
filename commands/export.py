@@ -4,7 +4,7 @@ import sqlite3
 import csv
 import json
 from datetime import datetime
-from commands.db_config import get_db_path
+from commands.db import get_db_path
 
 class ExportManager:
     def __init__(self, db_path=None):
