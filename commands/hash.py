@@ -255,6 +255,16 @@ class HashCalculator:
                     sys.stdout.write(f"    {self.format_size(file_size):>10s}  {short_path}\n")
                     sys.stdout.flush()
                 
+                if isinstance(file_modified, str):
+                    try:
+                        dt = datetime.fromisoformat(file_modified)
+                        file_modified = dt.timestamp()
+                    except:
+                        try:
+                            file_modified = float(file_modified)
+                        except:
+                            file_modified = 0
+                
                 should_skip = False
                 
                 if mode == 'new':
@@ -271,7 +281,10 @@ class HashCalculator:
                                 dt = datetime.fromisoformat(existing_modified)
                                 existing_modified = dt.timestamp()
                             except:
-                                existing_modified = float(existing_modified)
+                                try:
+                                    existing_modified = float(existing_modified)
+                                except:
+                                    existing_modified = 0
                         
                         if existing_size == file_size and abs(existing_modified - file_modified) < 0.001:
                             should_skip = True
