@@ -18,10 +18,12 @@ from commands.index import FileScanner
 from commands.hash import HashCalculator
 from commands import index, show, hash, export, clean, config, db
 
-# 初始化 Typer 应用
-app = typer.Typer()
+app = typer.Typer(
+    name="duplicate",
+    help="[bold blue]🔍 重复文件查找工具[/bold blue]",
+    rich_markup_mode=True
+)
 
-# 注册命令
 app.add_typer(index.app, name="index")
 app.add_typer(show.app, name="show")
 app.add_typer(hash.app, name="hash")

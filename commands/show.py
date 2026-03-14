@@ -643,7 +643,11 @@ class DataViewer:
         conn.close()
         return result
 
-app = typer.Typer()
+app = typer.Typer(
+    name="show",
+    help="[bold blue]📊 显示信息[/bold blue]",
+    rich_markup_mode=True
+)
 analyzer = DataViewer()
 
 @app.command()
@@ -656,19 +660,40 @@ def groups(
     sort: str = "size",
     detail: Optional[int] = None
 ):
-    """显示重复文件组列表"""
+    """[bold]显示重复文件组列表[/bold]
+    
+    [dim]显示已确认的重复文件组，按大小排序[/dim]
+    """
+    console = Console()
     hash_only = not unconfirmed
     
-    # 解析大小参数
+    def format_size(size):
+        if size >= 1073741824:
+            return f"{size/1073741824:.2f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.2f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.2f} KB"
+        else:
+            return f"{size} B"
+    
+    def format_size_colored(size):
+        if size >= 1073741824:
+            return f"[bold red]{size/1073741824:.2f} GB[/bold red]"
+        elif size >= 1048576:
+            return f"[bold yellow]{size/1048576:.2f} MB[/bold yellow]"
+        elif size >= 1024:
+            return f"[bold green]{size/1024:.2f} KB[/bold green]"
+        else:
+            return f"[bold]{size} B[/bold]"
+    
     parsed_min_size = _parse_size(min_size) if min_size else None
     parsed_max_size = _parse_size(max_size) if max_size else None
     
-    # 如果指定了 detail，显示组详情
     if detail is not None:
         _show_group_detail(detail)
         return
     
-    # 获取组列表
     groups = analyzer.get_groups_list(
         count=top,
         hash_only=hash_only,
@@ -678,24 +703,29 @@ def groups(
         sort_by=sort
     )
     
-    typer.echo("\n重复文件组列表")
-    typer.echo("=" * 60)
+    console.print()
+    console.print("[bold blue]📁 重复文件组列表[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
     
     if not groups:
-        typer.echo("  没有找到符合条件的重复文件组")
+        console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
     else:
         for group in groups:
-            typer.echo(f"\n组ID: {group['group_id']}")
-            typer.echo(f"  文件大小: {group['size']:,} 字节 ({group['size']/1024/1024:.2f} MB)")
-            typer.echo(f"  文件扩展名: {group['extension']}")
-            typer.echo(f"  文件数量: {group['file_count']} 个")
-            typer.echo(f"  可释放空间: {group['savable_space']:,} 字节 ({group['savable_space']/1024/1024/1024:.2f} GB)")
+            console.print(f"  [cyan]组ID: {group['group_id']}[/cyan]")
+            console.print("  [dim]───────────────────────────────────────────────[/dim]")
+            console.print(f"    文件大小      {format_size_colored(group['size'])}")
+            console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
+            console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
+            console.print(f"    可释放空间    {format_size_colored(group['savable_space'])}")
             if group['hash']:
-                typer.echo(f"  哈希值: {group['hash']}")
+                console.print(f"    哈希值        [dim]{group['hash'][:16]}...[/dim]")
             else:
-                typer.echo(f"  哈希值: 未确认")
+                console.print(f"    哈希值        [yellow]未确认[/yellow]")
+            console.print()
     
-    typer.echo("=" * 60)
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
 
 @app.command()
 def files(
@@ -704,75 +734,96 @@ def files(
     hash: bool = False,
     limit: int = 100
 ):
-    """查询文件，支持路径或模式"""
+    """[bold]查询文件，支持路径或模式[/bold]
+    
+    [dim]搜索重复文件组或已索引的文件[/dim]
+    """
+    console = Console()
     show_all = all
     show_hash = hash
     
-    # 判断是路径还是模式（包含通配符或不是完整路径）
+    def format_size(size):
+        if size >= 1073741824:
+            return f"{size/1073741824:.2f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.2f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.2f} KB"
+        else:
+            return f"{size} B"
+    
+    def format_size_colored(size):
+        if size >= 1073741824:
+            return f"[bold red]{size/1073741824:.2f} GB[/bold red]"
+        elif size >= 1048576:
+            return f"[bold yellow]{size/1048576:.2f} MB[/bold yellow]"
+        elif size >= 1024:
+            return f"[bold green]{size/1024:.2f} KB[/bold green]"
+        else:
+            return f"[bold]{size} B[/bold]"
+    
     has_wildcard = '*' in pattern or '?' in pattern
     
-    # 检查是否是完整路径（Windows路径格式）
     is_full_path = False
     if not has_wildcard:
-        # 检查是否是Windows路径格式（如 C:\ 或 D:\）
         if len(pattern) >= 2 and pattern[1] == ':' and (pattern[0].isalpha()):
             is_full_path = True
-        # 检查是否是绝对路径（以 \ 或 / 开头）
         elif pattern.startswith('\\') or pattern.startswith('/'):
             is_full_path = True
     
     if has_wildcard or not is_full_path:
-        # 模式搜索：查找重复文件组
-        # 根据 --all 选项决定是否只显示已计算哈希的组
         hash_only = not show_all
         groups = analyzer.filter_by_pattern(pattern, hash_only=hash_only)
         
-        # 如果不是显示所有组，则获取所有组（包括未计算哈希的）用于提示
         unhashed_count = 0
         if not show_all:
             all_groups = analyzer.filter_by_pattern(pattern, hash_only=False)
             unhashed_count = len(all_groups) - len(groups)
         
-        typer.echo(f"\n文件搜索结果（模式: {pattern}）")
-        typer.echo("=" * 60)
+        console.print()
+        console.print(f"[bold blue]🔍 文件搜索结果（模式: {pattern}）[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
         
         if not groups:
-            typer.echo("  没有找到匹配的文件")
+            console.print("  [dim]没有找到匹配的文件[/dim]")
             if unhashed_count > 0:
-                typer.echo(f"\n  提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏")
-                typer.echo("  使用 --all 选项显示所有组（包括未计算哈希的）")
+                console.print()
+                console.print(f"  [yellow]提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
         else:
-            typer.echo(f"  找到 {len(groups)} 个匹配的重复文件组")
+            console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个匹配的重复文件组")
+            console.print()
             for i, group in enumerate(groups[:limit], 1):
-                typer.echo(f"\n{i}. 组ID: {group['group_id']}")
-                typer.echo(f"   文件大小: {group['size']:,} 字节")
-                typer.echo(f"   文件扩展名: {group['extension']}")
-                typer.echo(f"   文件数量: {group['file_count']} 个")
-                typer.echo(f"   匹配的文件:")
+                console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
+                console.print(f"    文件大小      {format_size_colored(group['size'])}")
+                console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
+                console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
+                console.print("    匹配的文件:")
                 for j, filepath in enumerate(group['matched_files'][:5], 1):
-                    typer.echo(f"     {j}. {filepath}")
+                    console.print(f"      [dim]{j}.[/dim] {filepath}")
                 if len(group['matched_files']) > 5:
-                    typer.echo(f"     ... 还有 {len(group['matched_files']) - 5} 个匹配文件")
+                    console.print(f"      [dim]... 还有 {len(group['matched_files']) - 5} 个匹配文件[/dim]")
+                console.print()
             
             if len(groups) > limit:
-                typer.echo(f"\n... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）")
+                console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
+                console.print()
             
             if unhashed_count > 0:
-                typer.echo(f"\n  提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏")
-                typer.echo("  使用 --all 选项显示所有组（包括未计算哈希的）")
+                console.print(f"  [yellow]提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
         
-        typer.echo("=" * 60)
+        console.print()
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
     else:
-        # 路径查询：显示已索引的文件
         if show_all:
-            # 显示所有已索引文件
             conn = analyzer.get_connection()
             cursor = conn.cursor()
             
-            # 规范化路径：统一使用正斜杠，转为小写
             normalized_pattern = pattern.replace('\\', '/').lower()
             
-            # 使用大小写不敏感的匹配
             query = '''
                 SELECT f.Filename, f.Size, f.Modified, fh.Hash, fh.created_at
                 FROM files f
@@ -785,81 +836,127 @@ def files(
             files = cursor.fetchall()
             conn.close()
             
-            typer.echo(f"\n路径 {pattern} 下已索引的文件:")
+            console.print()
+            console.print(f"[bold blue]📂 路径 {pattern} 下已索引的文件[/bold blue]")
+            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+            console.print()
+            
             if not files:
-                typer.echo("  没有找到已索引的文件")
+                console.print("  [dim]没有找到已索引的文件[/dim]")
             else:
                 for i, (filename, size, modified, hash_val, created_at) in enumerate(files, 1):
-                    hash_status = "已计算" if hash_val else "未计算"
-                    typer.echo(f"  {i}. {filename}")
-                    typer.echo(f"     大小: {size:,} 字节, 修改时间: {modified}, 哈希状态: {hash_status}")
+                    hash_status = "[green]已计算[/green]" if hash_val else "[yellow]未计算[/yellow]"
+                    console.print(f"  [dim]{i}.[/dim] {filename}")
+                    console.print(f"    大小: {format_size_colored(size)}    修改时间: [dim]{modified}[/dim]    哈希状态: {hash_status}")
                     if show_hash and hash_val:
-                        typer.echo(f"     哈希值: {hash_val}")
+                        console.print(f"    哈希值: [dim]{hash_val[:16]}...[/dim]")
                         if created_at:
-                            typer.echo(f"     计算时间: {created_at}")
+                            console.print(f"    计算时间: [dim]{created_at}[/dim]")
+                    console.print()
             
             if len(files) >= limit:
-                typer.echo(f"\n... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）")
+                console.print(f"  [dim]... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）[/dim]")
+            
+            console.print()
+            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+            console.print()
         else:
-            # 显示路径下的重复文件组
-            # 根据 --all 选项决定是否只显示已计算哈希的组
             hash_only = not show_all
             groups = analyzer.get_groups_by_path(pattern, hash_only=hash_only)
             
-            # 如果不是显示所有组，则获取所有组（包括未计算哈希的）用于提示
             unhashed_count = 0
             if not show_all:
                 all_groups = analyzer.get_groups_by_path(pattern, hash_only=False)
                 unhashed_count = len(all_groups) - len(groups)
             
-            typer.echo(f"\n路径 {pattern} 下的重复文件")
-            typer.echo("=" * 60)
+            console.print()
+            console.print(f"[bold blue]📂 路径 {pattern} 下的重复文件[/bold blue]")
+            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+            console.print()
             
             if not groups:
-                typer.echo("  没有找到重复文件")
+                console.print("  [dim]没有找到重复文件[/dim]")
                 if unhashed_count > 0:
-                    typer.echo(f"\n  提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏")
-                    typer.echo("  使用 --all 选项显示所有组（包括未计算哈希的）")
+                    console.print()
+                    console.print(f"  [yellow]提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                    console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
             else:
-                typer.echo(f"  找到 {len(groups)} 个重复文件组")
+                console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个重复文件组")
+                console.print()
                 for i, group in enumerate(groups[:limit], 1):
-                    typer.echo(f"\n{i}. 组ID: {group['group_id']}")
-                    typer.echo(f"   文件大小: {group['size']:,} 字节")
-                    typer.echo(f"   文件扩展名: {group['extension']}")
-                    typer.echo(f"   文件数量: {group['file_count']} 个")
-                    typer.echo(f"   包含的文件:")
+                    console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
+                    console.print(f"    文件大小      {format_size_colored(group['size'])}")
+                    console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
+                    console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
+                    console.print("    包含的文件:")
                     for j, filepath in enumerate(group['files'][:5], 1):
-                        typer.echo(f"     {j}. {filepath}")
+                        console.print(f"      [dim]{j}.[/dim] {filepath}")
                     if len(group['files']) > 5:
-                        typer.echo(f"     ... 还有 {len(group['files']) - 5} 个文件")
+                        console.print(f"      [dim]... 还有 {len(group['files']) - 5} 个文件[/dim]")
+                    console.print()
                 
                 if len(groups) > limit:
-                    typer.echo(f"\n... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）")
+                    console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
+                    console.print()
                 
                 if unhashed_count > 0:
-                    typer.echo(f"\n  提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏")
-                    typer.echo("  使用 --all 选项显示所有组（包括未计算哈希的）")
-        
-        typer.echo("=" * 60)
+                    console.print(f"  [yellow]提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                    console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
+            
+            console.print()
+            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+            console.print()
 
 @app.command()
 def hash(hash_value: str):
-    """显示指定哈希值的所有文件"""
+    """[bold]显示指定哈希值的所有文件[/bold]
+    
+    [dim]根据哈希值查找所有重复文件[/dim]
+    """
+    console = Console()
     files = analyzer.get_duplicate_details(hash_value)
     
-    typer.echo(f"\n哈希值为 {hash_value} 的重复文件:")
-    typer.echo("=" * 60)
+    def format_size(size):
+        if size >= 1073741824:
+            return f"{size/1073741824:.2f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.2f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.2f} KB"
+        else:
+            return f"{size} B"
+    
+    def format_size_colored(size):
+        if size >= 1073741824:
+            return f"[bold red]{size/1073741824:.2f} GB[/bold red]"
+        elif size >= 1048576:
+            return f"[bold yellow]{size/1048576:.2f} MB[/bold yellow]"
+        elif size >= 1024:
+            return f"[bold green]{size/1024:.2f} KB[/bold green]"
+        else:
+            return f"[bold]{size} B[/bold]"
+    
+    console.print()
+    console.print(f"[bold blue]🔑 哈希值 {hash_value[:16]}... 的重复文件[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    
     if not files:
-        typer.echo("  没有找到文件")
+        console.print("  [dim]没有找到文件[/dim]")
     else:
         for i, file_info in enumerate(files, 1):
-            typer.echo(f"\n{i}. 文件路径: {file_info['filepath']}")
-            typer.echo(f"   磁盘: {file_info['disk']}")
-            typer.echo(f"   大小: {file_info['size']:,} 字节")
-            typer.echo(f"   修改时间: {file_info['modified']}")
-            typer.echo(f"   哈希值: {file_info['hash']}")
-            typer.echo(f"   计算时间: {file_info['created_at']}")
-    typer.echo("=" * 60)
+            console.print(f"  [cyan]{i}. 文件路径[/cyan]")
+            console.print(f"    {file_info['filepath']}")
+            console.print("  [dim]───────────────────────────────────────────────[/dim]")
+            console.print(f"    磁盘        [bold]{file_info['disk']}[/bold]")
+            console.print(f"    大小        {format_size_colored(file_info['size'])}")
+            console.print(f"    修改时间    [dim]{file_info['modified']}[/dim]")
+            console.print(f"    哈希值      [dim]{file_info['hash'][:16]}...[/dim]")
+            console.print(f"    计算时间    [dim]{file_info['created_at']}[/dim]")
+            console.print()
+    
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
 
 @app.command()
 def stats(
@@ -867,7 +964,10 @@ def stats(
     by_size_range: bool = False,
     by_date: bool = False
 ):
-    """显示统计分析"""
+    """[bold]显示统计分析[/bold]
+    
+    [dim]显示文件、重复组和类型分析的统计信息[/dim]
+    """
     console = Console()
     
     def format_size(size):
@@ -1062,44 +1162,55 @@ def _parse_size(size_str: str) -> int:
 
 def _show_group_detail(group_id: int):
     """显示指定组的详细信息"""
+    console = Console()
     group = analyzer.get_group_details(group_id)
 
     if not group:
-        typer.echo(f"错误: 找不到组ID: {group_id}")
+        console.print(f"[red]错误: 找不到组ID: {group_id}[/red]")
         return
 
-    # 格式化文件大小
-    size = group['size']
-    if size >= 1024 * 1024 * 1024:
-        size_str = f"{size / 1024 / 1024 / 1024:.2f} GB"
-    elif size >= 1024 * 1024:
-        size_str = f"{size / 1024 / 1024:.2f} MB"
-    elif size >= 1024:
-        size_str = f"{size / 1024:.2f} KB"
+    def format_size(size):
+        if size >= 1073741824:
+            return f"{size/1073741824:.2f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.2f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.2f} KB"
+        else:
+            return f"{size} B"
+    
+    def format_size_colored(size):
+        if size >= 1073741824:
+            return f"[bold red]{size/1073741824:.2f} GB[/bold red]"
+        elif size >= 1048576:
+            return f"[bold yellow]{size/1048576:.2f} MB[/bold yellow]"
+        elif size >= 1024:
+            return f"[bold green]{size/1024:.2f} KB[/bold green]"
+        else:
+            return f"[bold]{size} B[/bold]"
+
+    console.print()
+    console.print(f"[bold blue]📁 组 #{group_id} 详细信息[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    console.print(f"  文件大小      {format_size_colored(group['size'])}")
+    console.print(f"  文件扩展名    [bold]{group['extension'] or '无'}[/bold]")
+    console.print(f"  文件数量      [bold]{group['file_count']}[/bold] 个")
+    console.print(f"  可释放空间    {format_size_colored(group['savable_space'])}")
+    
+    if group['hash']:
+        console.print(f"  哈希值        [dim]{group['hash'][:16]}...[/dim]")
     else:
-        size_str = f"{size} B"
-
-    # 格式化可释放空间
-    savable = group['savable_space']
-    if savable >= 1024 * 1024 * 1024:
-        savable_str = f"{savable / 1024 / 1024 / 1024:.2f} GB"
-    elif savable >= 1024 * 1024:
-        savable_str = f"{savable / 1024 / 1024:.2f} MB"
-    elif savable >= 1024:
-        savable_str = f"{savable / 1024:.2f} KB"
-    else:
-        savable_str = f"{savable} B"
-
-    # 哈希值显示（截短）
-    hash_str = group['hash'] if group['hash'] else "未确认"
-    if hash_str != "未确认" and len(hash_str) > 16:
-        hash_str = hash_str[:16] + "..."
-
-    typer.echo(f"\n组 #{group_id} | 大小: {size_str} | 扩展名: {group['extension'] or '无'} | 文件数: {group['file_count']} | 可释放: {savable_str} | 哈希: {hash_str}")
-    typer.echo(f"{'=' * 100}")
-
-    # 列出重复文件的绝对路径
+        console.print(f"  哈希值        [yellow]未确认[/yellow]")
+    
+    console.print()
+    console.print("  [dim]───────────────────────────────────────────────[/dim]")
+    console.print("  📄 包含的文件")
+    console.print()
+    
     for i, file_info in enumerate(group['files'], 1):
-        typer.echo(f"  {i}. {file_info['filepath']}")
-
-    typer.echo(f"{'=' * 100}")
+        console.print(f"    [dim]{i}.[/dim] {file_info['filepath']}")
+    
+    console.print()
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
