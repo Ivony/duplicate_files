@@ -479,3 +479,160 @@ def clear(
             typer.echo(f"错误: 无效的组ID: {group_id}")
     
     conn.close()
+
+
+@app.command()
+def backup(
+    backup_path: str = typer.Argument(..., help="备份文件路径"),
+    format: str = typer.Option("csv", "--format", "-f", help="备份格式: csv 或 json")
+):
+    """备份哈希值到文件"""
+    import csv
+    import json
+    
+    backup_path = os.path.abspath(backup_path)
+    
+    # 自动添加扩展名
+    if format == "csv" and not backup_path.endswith('.csv'):
+        backup_path += '.csv'
+    elif format == "json" and not backup_path.endswith('.json'):
+        backup_path += '.json'
+    
+    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    cursor = conn.cursor()
+    
+    # 获取所有哈希值
+    cursor.execute('SELECT Filepath, Size, Modified, Hash, created_at FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if format == "csv":
+        # CSV格式备份
+        with open(backup_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Filepath', 'Size', 'Modified', 'Hash', 'created_at'])
+            writer.writerows(rows)
+    elif format == "json":
+        # JSON格式备份
+        data = []
+        for row in rows:
+            data.append({
+                'filepath': row[0],
+                'size': row[1],
+                'modified': row[2],
+                'hash': row[3],
+                'created_at': row[4]
+            })
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    typer.echo(f"哈希值已备份到: {backup_path}")
+    typer.echo(f"  共备份 {len(rows)} 条记录")
+
+
+@app.command()
+def restore(
+    backup_path: str = typer.Argument(..., help="备份文件路径"),
+    format: str = typer.Option("auto", "--format", "-f", help="备份格式: auto, csv 或 json"),
+    merge: bool = typer.Option(False, "--merge", "-m", help="合并模式（保留现有数据）")
+):
+    """从文件还原哈希值"""
+    import csv
+    import json
+    
+    backup_path = os.path.abspath(backup_path)
+    
+    if not os.path.exists(backup_path):
+        typer.echo(f"错误: 备份文件不存在: {backup_path}")
+        return
+    
+    # 自动检测格式
+    if format == "auto":
+        if backup_path.endswith('.json'):
+            format = "json"
+        else:
+            format = "csv"
+    
+    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    cursor = conn.cursor()
+    
+    # 清空现有数据（非合并模式）
+    if not merge:
+        cursor.execute('DELETE FROM file_hash')
+        typer.echo("已清空现有哈希值数据")
+    
+    imported_count = 0
+    skipped_count = 0
+    
+    if format == "csv":
+        # CSV格式还原
+        with open(backup_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # 跳过表头
+            
+            for row in reader:
+                if len(row) >= 4:
+                    filepath, size, modified, hash_val = row[0], row[1], row[2], row[3]
+                    created_at = row[4] if len(row) > 4 else None
+                    
+                    # 检查是否已存在
+                    cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Filepath = ?', (filepath,))
+                    if cursor.fetchone()[0] > 0:
+                        if merge:
+                            cursor.execute('''
+                                UPDATE file_hash SET Size = ?, Modified = ?, Hash = ?, created_at = ?
+                                WHERE Filepath = ?
+                            ''', (size, modified, hash_val, created_at, filepath))
+                            imported_count += 1
+                        else:
+                            skipped_count += 1
+                    else:
+                        cursor.execute('''
+                            INSERT INTO file_hash (Filepath, Size, Modified, Hash, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (filepath, size, modified, hash_val, created_at))
+                        imported_count += 1
+    
+    elif format == "json":
+        # JSON格式还原
+        with open(backup_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        for item in data:
+            filepath = item.get('filepath') or item.get('Filepath')
+            size = item.get('size') or item.get('Size')
+            modified = item.get('modified') or item.get('Modified')
+            hash_val = item.get('hash') or item.get('Hash')
+            created_at = item.get('created_at') or item.get('created_at')
+            
+            if filepath and hash_val:
+                cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Filepath = ?', (filepath,))
+                if cursor.fetchone()[0] > 0:
+                    if merge:
+                        cursor.execute('''
+                            UPDATE file_hash SET Size = ?, Modified = ?, Hash = ?, created_at = ?
+                            WHERE Filepath = ?
+                        ''', (size, modified, hash_val, created_at, filepath))
+                        imported_count += 1
+                    else:
+                        skipped_count += 1
+                else:
+                    cursor.execute('''
+                        INSERT INTO file_hash (Filepath, Size, Modified, Hash, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (filepath, size, modified, hash_val, created_at))
+                    imported_count += 1
+    
+    conn.commit()
+    
+    # 统计结果
+    cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
+    total_count = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    typer.echo(f"哈希值已从 {backup_path} 还原")
+    typer.echo(f"  导入记录: {imported_count}")
+    if skipped_count > 0:
+        typer.echo(f"  跳过记录: {skipped_count}")
+    typer.echo(f"  当前总记录数: {total_count}")

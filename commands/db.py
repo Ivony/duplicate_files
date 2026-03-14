@@ -351,37 +351,6 @@ def optimize():
     db_manager.optimize_database()
 
 @app.command()
-def backup(
-    backup_path: str,
-    hash_only: bool = False
-):
-    """备份数据库，--hash-only 只备份file_hash表"""
-    backup_path = os.path.abspath(backup_path)
-    db_manager = DatabaseManager('file_index.db')
-    
-    if hash_only:
-        if not backup_path.endswith('.csv'):
-            backup_path += '.csv'
-        db_manager.backup_file_hash(backup_path)
-    else:
-        db_manager.backup_database(backup_path)
-
-@app.command()
-def restore(
-    backup_path: str,
-    hash_only: bool = False,
-    merge: bool = False
-):
-    """恢复数据库，--hash-only 只恢复file_hash表，--merge 合并模式"""
-    backup_path = os.path.abspath(backup_path)
-    db_manager = DatabaseManager('file_index.db')
-    
-    if hash_only:
-        db_manager.restore_file_hash(backup_path, merge=merge)
-    else:
-        db_manager.restore_database(backup_path)
-
-@app.command()
 def init(
     force: bool = False
 ):

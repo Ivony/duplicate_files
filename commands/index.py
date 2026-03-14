@@ -233,624 +233,6 @@ class FileScanner:
         
         conn.close()
 
-class HashCalculator:
-    """
-    哈希值计算器（性能优化版）
-    
-    优化方案：
-    1. 使用 xxHash 替代 MD5（速度提升 5-10 倍）
-    2. 动态调整缓冲区大小
-    3. 大文件使用内存映射（mmap）
-    4. 预读取优化
-    
-    重要说明：
-    本类中的所有哈希计算操作都是顺序执行的，绝对不要使用并行计算（多线程或多进程）。
-    
-    原因：
-    1. 哈希计算是磁盘IO密集型操作，不是CPU密集型操作
-    2. 并行计算会导致多个线程/进程同时读取磁盘，造成磁盘IO竞争
-    3. 磁盘IO竞争会导致磁头频繁寻道，大幅降低读取性能
-    4. 对于机械硬盘（HDD），并行读取会导致性能下降50%甚至更多
-    5. 即使是SSD，并行读取也不会带来明显的性能提升，反而可能降低性能
-    
-    因此，请保持顺序计算，一个文件一个文件地处理，这样才能获得最佳性能。
-    """
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
-        self.total_processed = 0
-        self.total_calculated = 0
-        self.total_skipped = 0
-        self.total_size_processed = 0
-        self.total_size_calculated = 0
-        self.total_size_for_speed = 0
-        self.start_time = 0
-        self.quiet = False
-    
-    def get_connection(self):
-        """获取数据库连接"""
-        return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
-    
-    def get_file_info(self, file_path):
-        """获取文件信息"""
-        try:
-            if not os.path.exists(file_path):
-                return None
-            
-            stat = os.stat(file_path)
-            return {
-                'size': stat.st_size,
-                'modified': stat.st_mtime
-            }
-        except Exception as e:
-            print(f"获取文件信息失败 {file_path}: {e}")
-            return None
-    
-    def _get_buffer_size(self, file_size):
-        """方案二：根据文件大小动态调整缓冲区大小"""
-        if file_size < 1024 * 1024:  # < 1MB
-            return 64 * 1024  # 64KB
-        elif file_size < 100 * 1024 * 1024:  # < 100MB
-            return 1024 * 1024  # 1MB
-        else:  # >= 100MB
-            return 4 * 1024 * 1024  # 4MB
-    
-    def _calculate_hash_mmap(self, file_path, file_size):
-        """方案五：使用内存映射计算大文件的哈希值"""
-        hasher = get_hasher()
-        with open(file_path, 'rb') as f:
-            # 方案六：预读取优化
-            try:
-                os.posix_fadvise(f.fileno(), 0, file_size, os.POSIX_FADV_SEQUENTIAL)
-            except (AttributeError, OSError):
-                pass
-            
-            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                # 分块处理，避免一次性处理过大的内存区域
-                chunk_size = self._get_buffer_size(file_size)
-                offset = 0
-                while offset < file_size:
-                    chunk = mm[offset:offset + chunk_size]
-                    hasher.update(chunk)
-                    offset += chunk_size
-        
-        return get_hash_hexdigest(hasher)
-    
-    def _calculate_hash_buffered(self, file_path, file_size):
-        """使用缓冲区读取计算哈希值"""
-        buffer_size = self._get_buffer_size(file_size)
-        hasher = get_hasher()
-        
-        with open(file_path, 'rb') as f:
-            # 方案六：预读取优化
-            try:
-                os.posix_fadvise(f.fileno(), 0, file_size, os.POSIX_FADV_SEQUENTIAL)
-            except (AttributeError, OSError):
-                pass
-            
-            while chunk := f.read(buffer_size):
-                hasher.update(chunk)
-        
-        return get_hash_hexdigest(hasher)
-    
-    def calculate_file_hash(self, file_path):
-        """
-        计算单个文件的哈希值（优化版）
-        
-        优化方案：
-        1. 使用 xxHash 替代 MD5
-        2. 根据文件大小动态调整缓冲区
-        3. 大文件使用内存映射
-        4. 预读取优化
-        
-        注意：此方法是顺序执行的，不要尝试使用多线程或多进程来并行计算多个文件的哈希值。
-        哈希计算是磁盘IO密集型操作，并行计算会导致磁盘IO竞争，反而降低性能。
-        """
-        try:
-            file_info = self.get_file_info(file_path)
-            if file_info is None:
-                return None
-            
-            file_size = file_info['size']
-            
-            # 方案五：大文件使用内存映射（>100MB）
-            # 注意：Windows 上 mmap 对小文件可能反而更慢
-            if file_size > 100 * 1024 * 1024 and hasattr(mmap, 'ACCESS_READ'):
-                try:
-                    hash_value = self._calculate_hash_mmap(file_path, file_size)
-                except Exception:
-                    # mmap 失败时回退到缓冲区读取
-                    hash_value = self._calculate_hash_buffered(file_path, file_size)
-            else:
-                hash_value = self._calculate_hash_buffered(file_path, file_size)
-            
-            return {
-                'filepath': file_path,
-                'size': file_size,
-                'hash': hash_value,
-                'modified': file_info['modified'],
-                'created_at': datetime.now().isoformat()
-            }
-        except Exception as e:
-            print(f"计算哈希失败 {file_path}: {e}")
-            return None
-    
-    def calculate_hash(self, mode='default', group_ids=None, filters=None, quiet=False):
-        """计算哈希值
-        
-        Args:
-            mode: 计算模式
-                'default' - 默认模式：检查并更新
-                'new' - 仅新增模式：仅计算从未计算过hash值的文件
-                'force' - 强制更新模式：对duplicate_files表中所有文件重新计算哈希值
-            group_ids: 指定的组ID列表，如果为None则根据filters选择组或选择所有组
-            filters: 过滤器字典，如 {'extension': '.mp4', 'size': '>1000000', 'unconfirmed': True}
-            quiet: 是否减少输出信息
-        """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        self.total_processed = 0
-        self.total_calculated = 0
-        self.total_skipped = 0
-        self.total_size_processed = 0
-        self.total_size_calculated = 0
-        self.total_size_for_speed = 0  # 用于速度计算的文件大小（不包括跳过的文件）
-        self.start_time = time.time()
-        self.quiet = quiet
-        
-        # 显示模式说明
-        mode_desc = {
-            'default': '默认模式 - 检查并更新变化的文件',
-            'new': '仅新增模式 - 仅计算从未计算过hash值的文件',
-            'force': '强制更新模式 - 对所有文件重新计算哈希值',
-            'verify': '验证模式 - 验证组的哈希值是否与所有文件一致'
-        }
-        
-        if not self.quiet:
-            print("\n" + "=" * 80)
-            print("哈希值计算")
-            print("=" * 80)
-            print(f"模式: {mode_desc.get(mode, mode)}")
-            print(f"哈希算法: {HASH_ALGORITHM.upper()}")
-        
-        # 获取要处理的重复文件组
-        if group_ids:
-            # 指定了组ID，只处理这些组
-            placeholders = ','.join(['?'] * len(group_ids))
-            cursor.execute(f'''
-                SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
-                FROM duplicate_groups dg
-                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-                WHERE dg.ID IN ({placeholders})
-                GROUP BY dg.ID
-                ORDER BY dg.Size DESC
-            ''', group_ids)
-            if not self.quiet:
-                print(f"指定组ID: {', '.join(map(str, group_ids))}")
-        elif filters:
-            # 根据过滤器选择组
-            where_conditions = []
-            params = []
-            
-            if 'extension' in filters:
-                where_conditions.append('dg.Extension = ?')
-                params.append(filters['extension'])
-            
-            if 'size' in filters:
-                size_filter = filters['size']
-                if size_filter.startswith('>') or size_filter.startswith('<'):
-                    operator = size_filter[0]
-                    size_value = int(size_filter[1:])
-                    where_conditions.append(f'dg.Size {operator} ?')
-                    params.append(size_value)
-                else:
-                    where_conditions.append('dg.Size = ?')
-                    params.append(int(size_filter))
-            
-            if 'unconfirmed' in filters and filters['unconfirmed']:
-                where_conditions.append('(dg.Hash IS NULL OR dg.Hash = "")')
-            
-            if where_conditions:
-                where_clause = ' AND '.join(where_conditions)
-                cursor.execute(f'''
-                    SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
-                    FROM duplicate_groups dg
-                    INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-                    WHERE {where_clause}
-                    GROUP BY dg.ID
-                    ORDER BY dg.Size DESC
-                ''', params)
-                
-                filter_desc = []
-                if 'extension' in filters:
-                    filter_desc.append(f"扩展名: {filters['extension']}")
-                if 'size' in filters:
-                    filter_desc.append(f"大小: {filters['size']}")
-                if 'unconfirmed' in filters and filters['unconfirmed']:
-                    filter_desc.append("未确认哈希值")
-                if not self.quiet:
-                    print(f"过滤条件: {', '.join(filter_desc)}")
-            else:
-                # 没有过滤器，获取所有组
-                cursor.execute('''
-                    SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
-                    FROM duplicate_groups dg
-                    INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-                    GROUP BY dg.ID
-                    ORDER BY dg.Size DESC
-                ''')
-        else:
-            # 没有指定组ID和过滤器，获取所有组
-            cursor.execute('''
-                SELECT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
-                FROM duplicate_groups dg
-                INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
-                GROUP BY dg.ID
-                ORDER BY dg.Size DESC
-            ''')
-        
-        groups = cursor.fetchall()
-        conn.close()
-        
-        total_groups = len(groups)
-        total_files = sum(group[3] for group in groups)
-        total_size = sum(group[2] * group[3] for group in groups)
-        
-        if not self.quiet:
-            print(f"重复文件组数量: {total_groups}")
-            print(f"待处理文件数量: {total_files} 个")
-            print(f"待处理文件总大小: {self.format_size(total_size)}")
-            print("=" * 80)
-        
-        if total_groups == 0:
-            if not self.quiet:
-                print("\n没有需要处理的文件")
-            return
-        
-        # 按组处理
-        for group_idx, (group_id, extension, size, file_count) in enumerate(groups, 1):
-            if not self.quiet:
-                print(f"\n{'=' * 80}")
-                print(f"处理第 {group_idx}/{total_groups} 组 (Group_ID: {group_id})")
-                print(f"扩展名: {extension}, 文件大小: {self.format_size(size)}, 文件数量: {file_count}")
-                print(f"{'=' * 80}")
-            
-            # 处理这个组
-            self.process_group(group_id, mode, total_files, total_size)
-        
-        elapsed = time.time() - self.start_time
-        
-        # 显示完成信息
-        if not self.quiet:
-            print("\n" + "=" * 80)
-            print("哈希计算完成！")
-            print("=" * 80)
-            print(f"总处理文件数: {self.total_processed} 个")
-            print(f"总处理大小: {self.format_size(self.total_size_processed)}")
-            print(f"计算哈希文件数: {self.total_calculated} 个")
-            print(f"计算哈希大小: {self.format_size(self.total_size_calculated)}")
-            print(f"跳过文件数: {self.total_skipped} 个")
-            print(f"耗时: {elapsed:.2f} 秒")
-            
-            if elapsed > 0:
-                speed_files = self.total_processed / elapsed
-                speed_size = self.total_size_processed / elapsed
-                print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
-            print("=" * 80)
-    
-    def process_group(self, group_id, mode, total_files, total_size):
-        """
-        处理一个重复文件组
-        
-        注意：此方法是顺序处理组内的所有文件，不使用并行计算。
-        原因是哈希计算是磁盘IO密集型操作，并行计算会导致性能下降。
-        """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        # 获取该组的所有文件
-        if mode == 'new':
-            # 仅新增模式：只获取从未计算过哈希值的文件
-            cursor.execute('''
-                SELECT df.Filepath, f.Size, f.Modified
-                FROM duplicate_files df
-                INNER JOIN files f ON df.Filepath = f.Filename
-                WHERE df.Group_ID = ? AND df.Filepath NOT IN (SELECT Filepath FROM file_hash)
-            ''', (group_id,))
-        else:
-            # 默认模式和强制更新模式：获取所有文件
-            cursor.execute('''
-                SELECT df.Filepath, f.Size, f.Modified
-                FROM duplicate_files df
-                INNER JOIN files f ON df.Filepath = f.Filename
-                WHERE df.Group_ID = ?
-            ''', (group_id,))
-        
-        files = cursor.fetchall()
-        
-        if not files:
-            conn.close()
-            if not self.quiet:
-                print("该组没有需要处理的文件")
-            return
-        
-        # 获取已计算的哈希值
-        file_paths = [file[0] for file in files]
-        placeholders = ','.join(['?'] * len(file_paths))
-        cursor.execute(f'SELECT Filepath, Size, Modified FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
-        existing_hashes = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
-        
-        # 计算哈希值
-        results = []
-        for file_path, file_size, file_modified in files:
-            # 显示即将处理的文件（不换行）
-            if not self.quiet:
-                print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
-            
-            # 检查是否需要跳过计算
-            should_skip = False
-            
-            if mode == 'new':
-                # 仅新增模式：如果file_hash表里有该文件的记录，就跳过
-                if file_path in existing_hashes:
-                    should_skip = True
-                    if not self.quiet:
-                        print("跳过（已有哈希记录）")
-                    self.total_skipped += 1
-                    self.total_processed += 1
-                    self.total_size_processed += file_size
-                    # 注意：跳过的文件不计入速度计算
-            
-            elif mode == 'default':
-                # 默认模式：如果file_hash表里有该文件的记录，并且文件大小和修改时间都匹配，才跳过
-                if file_path in existing_hashes:
-                    db_size, db_modified = existing_hashes[file_path]
-                    
-                    # 确保修改时间是数值类型
-                    if isinstance(file_modified, str):
-                        try:
-                            dt = datetime.fromisoformat(file_modified)
-                            file_modified = dt.timestamp()
-                        except:
-                            file_modified = float(file_modified)
-                    
-                    if isinstance(db_modified, str):
-                        try:
-                            dt = datetime.fromisoformat(db_modified)
-                            db_modified = dt.timestamp()
-                        except:
-                            db_modified = float(db_modified)
-                    
-                    if file_size == db_size and abs(file_modified - db_modified) < 0.001:
-                        should_skip = True
-                        if not self.quiet:
-                            print("跳过（文件未变化）")
-                        self.total_skipped += 1
-                        self.total_processed += 1
-                        self.total_size_processed += file_size
-            
-            elif mode == 'verify':
-                # 验证模式：只验证，不计算哈希值
-                should_skip = True
-                if not self.quiet:
-                    print("验证中...")
-                self.total_skipped += 1
-                self.total_processed += 1
-                self.total_size_processed += file_size
-            
-            # 如果不需要跳过，计算哈希值
-            if not should_skip:
-                result = self.calculate_file_hash(file_path)
-                if result:
-                    results.append(result)
-                    self.total_processed += 1
-                    self.total_size_processed += file_size
-                    self.total_size_for_speed += file_size  # 计入速度计算
-                    
-                    # 显示完成并换行
-                    if not self.quiet:
-                        print("完成")
-                else:
-                    if not self.quiet:
-                        print("失败")
-                    continue
-        
-        # 更新数据库
-        for result in results:
-            file_path = result['filepath']
-            actual_size = result['size']
-            actual_modified = result['modified']
-            hash_val = result['hash']
-            created_at = result['created_at']
-            
-            cursor.execute('''
-            INSERT OR REPLACE INTO file_hash (Filepath, Size, Hash, Modified, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (file_path, actual_size, hash_val, actual_modified, created_at))
-            self.total_calculated += 1
-            self.total_size_calculated += actual_size
-        
-        conn.commit()
-        
-        # 显示该组处理完成后的进度
-        current_time = time.time()
-        elapsed = current_time - self.start_time
-        speed_size = self.total_size_for_speed / elapsed if elapsed > 0 and self.total_size_for_speed > 0 else 0
-        progress_size = (self.total_size_processed / total_size * 100) if total_size > 0 else 0
-        
-        # 计算剩余时间
-        remaining_size = total_size - self.total_size_processed
-        remaining_time = remaining_size / speed_size if speed_size > 0 else 0
-        
-        # 格式化剩余时间
-        if remaining_time < 60:
-            time_str = f"{remaining_time:.0f} 秒"
-        elif remaining_time < 3600:
-            time_str = f"{remaining_time/60:.1f} 分钟"
-        else:
-            time_str = f"{remaining_time/3600:.1f} 小时"
-        
-        if not self.quiet:
-            print(f"\n进度: {self.format_size(self.total_size_processed)}/{self.format_size(total_size)} ({progress_size:.1f}%) - 剩余时间: {time_str} - 速度: {self.format_size(speed_size)}/秒")
-        
-        # 分析该组的哈希值结果并更新数据库
-        if not self.quiet:
-            print(f"\n分析该组的哈希值结果...")
-        
-        # 获取该组的信息
-        cursor.execute('SELECT Hash FROM duplicate_groups WHERE ID = ?', (group_id,))
-        group_hash = cursor.fetchone()
-        group_hash_val = group_hash[0] if group_hash else None
-        
-        # 获取该组所有文件的哈希值和文件信息
-        cursor.execute('''
-            SELECT fh.Hash, fh.Size, fh.Modified, df.Filepath, f.Size as current_size, f.Modified as current_modified
-            FROM duplicate_files df
-            INNER JOIN file_hash fh ON df.Filepath = fh.Filepath
-            INNER JOIN files f ON df.Filepath = f.Filename
-            WHERE df.Group_ID = ?
-        ''', (group_id,))
-        
-        hash_results = cursor.fetchall()
-        
-        if hash_results:
-            # 验证模式的处理
-            if mode == 'verify':
-                is_valid = True
-                validation_issues = []
-                
-                # 检查组哈希值是否存在
-                if not group_hash_val:
-                    validation_issues.append("组哈希值未设置")
-                    is_valid = False
-                
-                # 检查每个文件
-                for file_hash, db_size, db_modified, filepath, current_size, current_modified in hash_results:
-                    # 检查文件哈希值是否与组哈希值一致
-                    if group_hash_val and file_hash != group_hash_val:
-                        validation_issues.append(f"文件哈希值不匹配: {filepath}")
-                        is_valid = False
-                    
-                    # 确保修改时间是数值类型
-                    if isinstance(db_modified, str):
-                        try:
-                            dt = datetime.fromisoformat(db_modified)
-                            db_modified = dt.timestamp()
-                        except:
-                            db_modified = float(db_modified)
-                    
-                    if isinstance(current_modified, str):
-                        try:
-                            dt = datetime.fromisoformat(current_modified)
-                            current_modified = dt.timestamp()
-                        except:
-                            current_modified = float(current_modified)
-                    
-                    # 检查文件大小是否变化
-                    if current_size != db_size:
-                        validation_issues.append(f"文件大小变化: {filepath}")
-                        is_valid = False
-                    
-                    # 检查文件修改时间是否变化
-                    if abs(current_modified - db_modified) >= 0.001:
-                        validation_issues.append(f"文件修改时间变化: {filepath}")
-                        is_valid = False
-                
-                if is_valid:
-                    if not self.quiet:
-                        print(f"✓ 该组验证通过，哈希值一致且文件未变化")
-                        print(f"  组哈希值: {group_hash_val}")
-                else:
-                    # 验证失败，清除组哈希值
-                    cursor.execute('UPDATE duplicate_groups SET Hash = NULL WHERE ID = ?', (group_id,))
-                    conn.commit()
-                    if not self.quiet:
-                        print(f"✗ 该组验证失败，已清除哈希值")
-                        for issue in validation_issues:
-                            print(f"  - {issue}")
-            else:
-                # 按哈希值分组
-                hash_groups = {}
-                for row in hash_results:
-                    hash_val = row[0]
-                    filepath = row[3]
-                    if hash_val not in hash_groups:
-                        hash_groups[hash_val] = []
-                    hash_groups[hash_val].append(filepath)
-                
-                # 处理结果
-                if len(hash_groups) == 1:
-                    # 所有文件哈希值相同，更新组的Hash字段
-                    hash_val = list(hash_groups.keys())[0]
-                    cursor.execute('''
-                        UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
-                    ''', (hash_val, group_id))
-                    conn.commit()
-                    if not self.quiet:
-                        print(f"✓ 该组所有文件哈希值相同，确认为重复文件组")
-                        print(f"  哈希值: {hash_val}")
-                        print(f"  文件数量: {len(hash_groups[hash_val])}")
-                elif len(hash_groups) == len(hash_results):
-                    # 所有文件哈希值都不同，删除该组
-                    cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
-                    cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
-                    conn.commit()
-                    if not self.quiet:
-                        print(f"✗ 该组所有文件哈希值都不同，不是重复文件组")
-                        print(f"  已删除该组（{len(hash_results)} 个文件）")
-                else:
-                    # 部分文件哈希值相同，拆分为子组
-                    if not self.quiet:
-                        print(f"⚡ 该组拆分为 {len(hash_groups)} 个子组：")
-                    
-                    # 获取原组的信息
-                    cursor.execute('SELECT Size, Extension FROM duplicate_groups WHERE ID = ?', (group_id,))
-                    row = cursor.fetchone()
-                    size, extension = row if row else (0, '')
-                    
-                    # 先删除duplicate_files中的关联记录
-                    cursor.execute('DELETE FROM duplicate_files WHERE Group_ID = ?', (group_id,))
-                    # 再删除原组
-                    cursor.execute('DELETE FROM duplicate_groups WHERE ID = ?', (group_id,))
-                    
-                    # 为每个子组创建新的组
-                    for idx, (hash_val, filepaths) in enumerate(hash_groups.items(), 1):
-                        if len(filepaths) > 1:
-                            # 只有多个文件才创建组
-                            cursor.execute('''
-                                INSERT INTO duplicate_groups (Size, Extension, Hash)
-                                VALUES (?, ?, ?)
-                            ''', (size, extension, hash_val))
-                            new_group_id = cursor.lastrowid
-                            
-                            # 添加文件关联
-                            for filepath in filepaths:
-                                cursor.execute('''
-                                    INSERT INTO duplicate_files (Group_ID, Filepath)
-                                    VALUES (?, ?)
-                                ''', (new_group_id, filepath))
-                            
-                            if not self.quiet:
-                                print(f"  子组 {idx}: {len(filepaths)} 个文件 (哈希值: {hash_val[:16]}...)")
-                        else:
-                            if not self.quiet:
-                                print(f"  子组 {idx}: 1 个文件 (独立文件，不创建组)")
-                    
-                    conn.commit()
-        else:
-            if not self.quiet:
-                print("该组没有计算哈希值的文件")
-        
-        conn.close()
-    
-    def format_size(self, size):
-        """格式化文件大小"""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size < 1024.0:
-                return f"{size:.2f} {unit}"
-            size /= 1024.0
-        return f"{size:.2f} PB"
-
 class IndexManager:
     def __init__(self, db_path='file_index.db'):
         self.db_path = db_path
@@ -876,42 +258,81 @@ class IndexManager:
         
         print(f"已清除文件索引，删除了 {count} 个文件记录")
     
-    def clean_hash(self):
-        """清除哈希数据"""
+    def clean_files_by_pattern(self, pattern):
+        """按模式或路径清除文件索引
+        
+        Args:
+            pattern: 通配符模式或路径前缀
+        """
+        import fnmatch
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT COUNT(*) FROM file_hash')
-        count = cursor.fetchone()[0]
+        # 规范化模式：统一使用正斜杠，转为小写
+        normalized_pattern = pattern.replace('\\', '/').lower()
         
-        cursor.execute('DELETE FROM file_hash')
+        # 判断是通配符模式还是路径前缀
+        has_wildcard = '*' in pattern or '?' in pattern
+        
+        # 获取所有文件
+        cursor.execute('SELECT Filename FROM files')
+        all_files = [row[0] for row in cursor.fetchall()]
+        
+        # 筛选匹配的文件
+        files_to_delete = []
+        for filepath in all_files:
+            normalized_path = filepath.replace('\\', '/').lower()
+            
+            if has_wildcard:
+                # 通配符匹配：匹配文件名或完整路径
+                filename = os.path.basename(normalized_path)
+                if fnmatch.fnmatch(filename, normalized_pattern) or \
+                   fnmatch.fnmatch(normalized_path, normalized_pattern):
+                    files_to_delete.append(filepath)
+            else:
+                # 路径前缀匹配
+                if normalized_path.startswith(normalized_pattern):
+                    files_to_delete.append(filepath)
+        
+        if not files_to_delete:
+            print(f"没有找到匹配 '{pattern}' 的文件")
+            conn.close()
+            return
+        
+        print(f"找到 {len(files_to_delete)} 个匹配的文件")
+        
+        # 删除匹配的文件记录
+        placeholders = ','.join(['?'] * len(files_to_delete))
+        
+        # 从 duplicate_files 中删除
+        cursor.execute(f'''
+            DELETE FROM duplicate_files 
+            WHERE Filepath IN ({placeholders})
+        ''', files_to_delete)
+        duplicate_files_deleted = cursor.rowcount
+        
+        # 从 files 中删除
+        cursor.execute(f'''
+            DELETE FROM files 
+            WHERE Filename IN ({placeholders})
+        ''', files_to_delete)
+        files_deleted = cursor.rowcount
+        
+        # 清理空的重复文件组
+        cursor.execute('''
+            DELETE FROM duplicate_groups 
+            WHERE ID NOT IN (SELECT DISTINCT Group_ID FROM duplicate_files)
+        ''')
+        groups_deleted = cursor.rowcount
         
         conn.commit()
         conn.close()
         
-        print(f"已清除哈希数据，删除了 {count} 条哈希记录")
-    
-    def clean_full(self):
-        """清除所有数据"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM files')
-        files_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM file_hash')
-        hash_count = cursor.fetchone()[0]
-        
-        cursor.execute('DELETE FROM files')
-        cursor.execute('DELETE FROM duplicate_files')
-        cursor.execute('DELETE FROM duplicate_groups')
-        cursor.execute('DELETE FROM file_hash')
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"已清除所有数据")
-        print(f"删除了 {files_count} 个文件记录")
-        print(f"删除了 {hash_count} 条哈希记录")
+        print(f"已清除匹配的文件索引:")
+        print(f"  删除文件记录: {files_deleted} 个")
+        print(f"  删除重复文件关联: {duplicate_files_deleted} 个")
+        print(f"  清理空组: {groups_deleted} 个")
     
     def clean_index(self):
         """检查并清理索引文件
@@ -1051,7 +472,7 @@ class IndexManager:
         print("开始重建索引...")
         
         # 清除所有数据
-        self.clean_full()
+        self.clean_files()
         
         # 如果没有指定扫描路径，扫描所有磁盘
         if scan_paths is None:
@@ -1266,19 +687,42 @@ def rebuild():
 
 @app.command()
 def clear(
-    type: str = typer.Argument(..., help="清理类型: files, hash, full")
+    pattern: Optional[str] = typer.Argument(None, help="清理模式（通配符或路径前缀）"),
+    force: bool = typer.Option(False, "--force", "-f", help="强制清理，不询问"),
+    all: bool = typer.Option(False, "--all", "-a", help="清除所有文件索引")
 ):
-    """清除索引数据"""
+    """清除文件索引（保留哈希值，哈希值请使用 hash clear 清除）
+    
+    示例:
+        index clear --all                    # 清除所有文件索引
+        index clear "*.tmp"                  # 清除匹配通配符的文件
+        index clear "e:/downloads"           # 清除指定路径下的文件
+        index clear "e:/downloads/*.tmp"     # 清除指定路径下匹配通配符的文件
+    """
     manager = IndexManager('file_index.db')
     
-    if type == 'files':
+    if all:
+        # 清除所有文件索引
+        if not force:
+            typer.echo("这将清除所有文件索引，但保留哈希值")
+            typer.echo("哈希值可使用 hash clear 命令清除")
+            typer.echo("使用 --force 选项跳过确认")
+            return
         manager.clean_files()
-    elif type == 'hash':
-        manager.clean_hash()
-    elif type == 'full':
-        manager.clean_full()
+    elif pattern:
+        # 按模式或路径清除
+        if not force:
+            typer.echo(f"这将清除匹配 '{pattern}' 的文件索引，但保留哈希值")
+            typer.echo("哈希值可使用 hash clear 命令清除")
+            typer.echo("使用 --force 选项跳过确认")
+            return
+        manager.clean_files_by_pattern(pattern)
     else:
-        typer.echo(f"错误: 未知的清理类型: {type}")
+        typer.echo("错误: 请指定 --all 或提供匹配模式")
+        typer.echo("示例:")
+        typer.echo("  index clear --all              # 清除所有")
+        typer.echo("  index clear '*.tmp'            # 按通配符清除")
+        typer.echo("  index clear 'e:/downloads'     # 按路径清除")
 
 # 辅助函数
 def _rebuild_duplicate_groups():
