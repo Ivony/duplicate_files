@@ -9,9 +9,10 @@ import time
 import hashlib
 import mmap
 import sys
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 from datetime import datetime
 from rich.console import Console
+from rich.text import Text
 from commands.config import ConfigManager
 from commands.db import get_db_path
 
@@ -31,6 +32,9 @@ except ImportError:
 
 console = Console()
 
+CLEAR_LINE = "\033[2K"
+MOVE_UP = "\033[1A"
+
 app = typer.Typer(
     name="hash",
     help="[bold blue]🔐 哈希计算[/bold blue]",
@@ -47,6 +51,8 @@ class HashCalculator:
         self.total_size_processed = 0
         self.total_size_calculated = 0
         self.start_time = 0
+        self.completed_groups: List[Dict] = []
+        self.current_group_lines = 0
     
     def get_connection(self):
         """获取数据库连接"""
@@ -68,18 +74,71 @@ class HashCalculator:
         try:
             hasher = get_hasher()
             with open(file_path, 'rb') as f:
-                # 对于大文件使用内存映射
-                if os.path.getsize(file_path) > 10 * 1024 * 1024:  # 大于10MB
+                if os.path.getsize(file_path) > 10 * 1024 * 1024:
                     with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                         hasher.update(mm)
                 else:
-                    # 小文件直接读取
                     while chunk := f.read(8192):
                         hasher.update(chunk)
             return get_hash_hexdigest(hasher)
         except Exception as e:
             print(f"计算哈希失败 {file_path}: {e}")
             return None
+    
+    def _clear_current_group_output(self):
+        """清除当前组的输出"""
+        if self.current_group_lines > 0:
+            for _ in range(self.current_group_lines):
+                sys.stdout.write(MOVE_UP + CLEAR_LINE)
+            sys.stdout.flush()
+            self.current_group_lines = 0
+    
+    def _print_completed_groups(self):
+        """打印已完成的组列表"""
+        for group_info in self.completed_groups:
+            status_icon = group_info['status_icon']
+            status_text = group_info['status_text']
+            status_color = group_info['status_color']
+            
+            line = f"  {status_icon} 组 {group_info['group_id']} ({group_info['file_count']} 文件, {self.format_size(group_info['size'])}) - [{status_color}]{status_text}[/{status_color}]"
+            console.print(line)
+    
+    def _print_group_result(self, group_id: int, file_count: int, size: int, 
+                            calculated: int, skipped: int, result: str, 
+                            new_groups: int = 0):
+        """打印组的处理结果"""
+        if result == 'confirmed':
+            status_icon = "✅"
+            status_text = f"已确认 (计算 {calculated}, 跳过 {skipped})"
+            status_color = "green"
+        elif result == 'split':
+            status_icon = "🔀"
+            status_text = f"已拆分为 {new_groups} 个组 (计算 {calculated}, 跳过 {skipped})"
+            status_color = "yellow"
+        elif result == 'dissolved':
+            status_icon = "💨"
+            status_text = f"已解散 (计算 {calculated}, 跳过 {skipped})"
+            status_color = "dim"
+        else:
+            status_icon = "❓"
+            status_text = f"未知状态 (计算 {calculated}, 跳过 {skipped})"
+            status_color = "red"
+        
+        self.completed_groups.append({
+            'group_id': group_id,
+            'file_count': file_count,
+            'size': size,
+            'calculated': calculated,
+            'skipped': skipped,
+            'result': result,
+            'new_groups': new_groups,
+            'status_icon': status_icon,
+            'status_text': status_text,
+            'status_color': status_color
+        })
+        
+        self._clear_current_group_output()
+        self._print_completed_groups()
     
     def calculate_hash(self, mode='default', group_ids=None, filters=None):
         """
@@ -95,6 +154,7 @@ class HashCalculator:
             filters: 过滤条件字典，支持 'extension', 'size', 'unconfirmed'
         """
         self.start_time = time.time()
+        self.completed_groups = []
         conn = None
         try:
             conn = self.get_connection()
@@ -180,15 +240,24 @@ class HashCalculator:
             
             for group_idx, (group_id, extension, size, file_count) in enumerate(groups, 1):
                 if not self.quiet:
-                    sys.stdout.write("\r")
-                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
-                    sys.stdout.write(f"  \033[33m⏳ 处理进度\033[0m\n")
-                    sys.stdout.write(f"  第 {group_idx}/{total_groups} 组 (ID: {group_id})    扩展名: {extension}    大小: {self.format_size(size)}    文件数: {file_count}\n")
-                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
-                    sys.stdout.write(f"  \033[36m💾 正在计算\033[0m\n")
-                    sys.stdout.flush()
+                    console.print(f"  [dim]───────────────────────────────────────────────[/dim]")
+                    console.print(f"  [yellow]⏳[/yellow] 第 {group_idx}/{total_groups} 组 (ID: {group_id})  扩展名: {extension}  大小: {self.format_size(size)}  文件数: {file_count}")
+                    console.print(f"  [dim]───────────────────────────────────────────────[/dim]")
+                    console.print()
+                    self.current_group_lines = 0
                 
-                self.process_group(group_id, mode, total_files, total_size)
+                result = self.process_group(group_id, mode, extension, size, file_count)
+                
+                if not self.quiet:
+                    self._print_group_result(
+                        group_id=group_id,
+                        file_count=file_count,
+                        size=size,
+                        calculated=result['calculated'],
+                        skipped=result['skipped'],
+                        result=result['result'],
+                        new_groups=result.get('new_groups', 0)
+                    )
             
             elapsed = time.time() - self.start_time
             
@@ -214,9 +283,16 @@ class HashCalculator:
             if conn:
                 conn.close()
     
-    def process_group(self, group_id, mode, total_files, total_size):
-        """处理一个重复文件组"""
+    def process_group(self, group_id, mode, extension, size, file_count) -> Dict:
+        """处理一个重复文件组，返回处理结果"""
         conn = None
+        result = {
+            'calculated': 0,
+            'skipped': 0,
+            'result': 'unknown',
+            'new_groups': 0
+        }
+        
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -239,22 +315,19 @@ class HashCalculator:
             files = cursor.fetchall()
             
             if not files:
-                return
+                result['result'] = 'confirmed'
+                return result
             
             file_paths = [file[0] for file in files]
             placeholders = ','.join(['?'] * len(file_paths))
-            cursor.execute(f'SELECT Filepath, Size, Modified FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
-            existing_hashes = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+            cursor.execute(f'SELECT Filepath, Size, Modified, Hash FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
+            existing_hash_rows = cursor.fetchall()
+            existing_hashes = {row[0]: (row[1], row[2], row[3]) for row in existing_hash_rows}
             
             results = []
+            file_hash_map: Dict[str, str] = {}
+            
             for file_path, file_size, file_modified in files:
-                if not self.quiet:
-                    short_path = file_path
-                    if len(short_path) > 60:
-                        short_path = "..." + short_path[-57:]
-                    sys.stdout.write(f"    {self.format_size(file_size):>10s}  {short_path}\n")
-                    sys.stdout.flush()
-                
                 if isinstance(file_modified, str):
                     try:
                         dt = datetime.fromisoformat(file_modified)
@@ -266,16 +339,21 @@ class HashCalculator:
                             file_modified = 0
                 
                 should_skip = False
+                skip_reason = ""
                 
                 if mode == 'new':
                     if file_path in existing_hashes:
                         should_skip = True
+                        skip_reason = "已有哈希"
                         self.total_skipped += 1
+                        result['skipped'] += 1
+                        if existing_hashes[file_path][2]:
+                            file_hash_map[file_path] = existing_hashes[file_path][2]
                 elif mode == 'force':
                     pass
                 else:
                     if file_path in existing_hashes:
-                        existing_size, existing_modified = existing_hashes[file_path]
+                        existing_size, existing_modified, existing_hash = existing_hashes[file_path]
                         if isinstance(existing_modified, str):
                             try:
                                 dt = datetime.fromisoformat(existing_modified)
@@ -288,7 +366,24 @@ class HashCalculator:
                         
                         if existing_size == file_size and abs(existing_modified - file_modified) < 0.001:
                             should_skip = True
+                            skip_reason = "文件未变"
                             self.total_skipped += 1
+                            result['skipped'] += 1
+                            if existing_hash:
+                                file_hash_map[file_path] = existing_hash
+                
+                if not self.quiet:
+                    short_path = file_path
+                    if len(short_path) > 50:
+                        short_path = "..." + short_path[-47:]
+                    
+                    if should_skip:
+                        line = f"    [dim]{self.format_size(file_size):>10s}  {short_path}[/dim] [yellow]⏭️ {skip_reason}[/yellow]"
+                    else:
+                        line = f"    {self.format_size(file_size):>10s}  {short_path} [cyan]⏳ 计算中...[/cyan]"
+                    
+                    console.print(line)
+                    self.current_group_lines += 1
                 
                 if should_skip:
                     self.total_processed += 1
@@ -299,8 +394,19 @@ class HashCalculator:
                 
                 if hash_value:
                     results.append((file_path, file_size, file_modified, hash_value))
+                    file_hash_map[file_path] = hash_value
                     self.total_calculated += 1
                     self.total_size_calculated += file_size
+                    result['calculated'] += 1
+                    
+                    if not self.quiet:
+                        sys.stdout.write(MOVE_UP + CLEAR_LINE)
+                        sys.stdout.flush()
+                        self.current_group_lines -= 1
+                        
+                        line = f"    {self.format_size(file_size):>10s}  {short_path} [green]✅ 已计算[/green]"
+                        console.print(line)
+                        self.current_group_lines += 1
                 
                 self.total_processed += 1
                 self.total_size_processed += file_size
@@ -321,30 +427,95 @@ class HashCalculator:
                         ''', (file_path, file_size, file_modified, hash_value))
                 
                 conn.commit()
-                
-                self._update_group_hash(cursor, conn, group_id)
+            
+            group_result = self._update_group_hash(cursor, conn, group_id, file_hash_map)
+            result['result'] = group_result['result']
+            result['new_groups'] = group_result.get('new_groups', 0)
+            
         finally:
             if conn:
                 conn.close()
+        
+        return result
     
-    def _update_group_hash(self, cursor, conn, group_id):
-        """更新组的哈希值（取该组所有文件哈希值的最大值）"""
+    def _update_group_hash(self, cursor, conn, group_id: int, file_hash_map: Dict[str, str]) -> Dict:
+        """更新组的哈希值，处理组的拆分或解散"""
         cursor.execute('''
-            SELECT fh.Hash
+            SELECT df.Filepath
             FROM duplicate_files df
             INNER JOIN file_hash fh ON df.Filepath = fh.Filepath
             WHERE df.Group_ID = ? AND fh.Hash IS NOT NULL AND fh.Hash != ''
         ''', (group_id,))
         
-        hashes = [row[0] for row in cursor.fetchall()]
+        files_with_hash = cursor.fetchall()
         
-        if hashes:
-            # 使用第一个非空哈希值作为组的哈希值
-            group_hash = hashes[0]
+        if not files_with_hash:
+            return {'result': 'dissolved'}
+        
+        hash_groups: Dict[str, List[str]] = {}
+        for (filepath,) in files_with_hash:
+            if filepath in file_hash_map:
+                hash_value = file_hash_map[filepath]
+                if hash_value not in hash_groups:
+                    hash_groups[hash_value] = []
+                hash_groups[hash_value].append(filepath)
+        
+        if len(hash_groups) == 0:
+            return {'result': 'dissolved'}
+        
+        if len(hash_groups) == 1:
+            group_hash = list(hash_groups.keys())[0]
             cursor.execute('''
                 UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
             ''', (group_hash, group_id))
             conn.commit()
+            return {'result': 'confirmed'}
+        
+        if len(hash_groups) > 1:
+            cursor.execute('SELECT Size, Extension FROM duplicate_groups WHERE ID = ?', (group_id,))
+            group_info = cursor.fetchone()
+            if not group_info:
+                return {'result': 'dissolved'}
+            
+            group_size, group_extension = group_info
+            
+            sorted_groups = sorted(hash_groups.items(), key=lambda x: len(x[1]), reverse=True)
+            
+            main_hash, main_files = sorted_groups[0]
+            cursor.execute('''
+                UPDATE duplicate_groups SET Hash = ? WHERE ID = ?
+            ''', (main_hash, group_id))
+            
+            new_group_count = 0
+            for hash_value, filepaths in sorted_groups[1:]:
+                if len(filepaths) >= 2:
+                    cursor.execute('''
+                        INSERT INTO duplicate_groups (Size, Extension, Hash)
+                        VALUES (?, ?, ?)
+                    ''', (group_size, group_extension, hash_value))
+                    new_group_id = cursor.lastrowid
+                    new_group_count += 1
+                    
+                    for filepath in filepaths:
+                        cursor.execute('''
+                            UPDATE duplicate_files SET Group_ID = ? WHERE Filepath = ?
+                        ''', (new_group_id, filepath))
+                else:
+                    for filepath in filepaths:
+                        cursor.execute('DELETE FROM duplicate_files WHERE Filepath = ?', (filepath,))
+            
+            conn.commit()
+            
+            if new_group_count > 0:
+                return {'result': 'split', 'new_groups': new_group_count + 1}
+            else:
+                main_file_count = len(main_files)
+                total_files = sum(len(files) for files in hash_groups.values())
+                if main_file_count < 2:
+                    return {'result': 'dissolved'}
+                return {'result': 'confirmed'}
+        
+        return {'result': 'unknown'}
 
 
 @app.command()
