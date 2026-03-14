@@ -8,12 +8,13 @@ import sqlite3
 import time
 import hashlib
 import mmap
+import sys
 from typing import Optional
 from datetime import datetime
+from rich.console import Console
 from commands.config import ConfigManager
 from commands.db import get_db_path
 
-# 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:
     import xxhash
     HASH_ALGORITHM = 'xxhash'
@@ -28,7 +29,13 @@ except ImportError:
     def get_hash_hexdigest(hasher):
         return hasher.hexdigest()
 
-app = typer.Typer(help="哈希计算和验证指令")
+console = Console()
+
+app = typer.Typer(
+    name="hash",
+    help="[bold blue]🔐 哈希计算[/bold blue]",
+    rich_markup_mode=True
+)
 
 class HashCalculator:
     def __init__(self, db_path=None, quiet=False):
@@ -93,7 +100,6 @@ class HashCalculator:
             conn = self.get_connection()
             cursor = conn.cursor()
             
-            # 构建查询条件
             conditions = []
             params = []
             
@@ -120,18 +126,11 @@ class HashCalculator:
                 if 'unconfirmed' in filters and filters['unconfirmed']:
                     conditions.append("(dg.Hash IS NULL OR dg.Hash = '')")
             
-            # 根据模式调整查询
-            if mode == 'new':
-                # 仅新增模式：只处理从未计算过哈希值的文件
-                pass  # 在process_group中处理
-            elif mode == 'verify':
-                # 验证模式：只处理已有哈希值的文件
+            if mode == 'verify':
                 conditions.append("dg.Hash IS NOT NULL AND dg.Hash != ''")
             
-            # 构建WHERE子句
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             
-            # 获取要处理的组
             query = f'''
                 SELECT DISTINCT dg.ID, dg.Extension, dg.Size, COUNT(df.Filepath) as file_count
                 FROM duplicate_groups dg
@@ -149,55 +148,68 @@ class HashCalculator:
             total_size = sum(g[2] * g[3] for g in groups)
             
             if not self.quiet:
-                print("=" * 80)
-                print("哈希计算")
-                print("=" * 80)
-                print(f"计算模式: {mode}")
-                print(f"哈希算法: {HASH_ALGORITHM}")
+                mode_names = {
+                    'default': '默认模式',
+                    'new': '仅新增模式',
+                    'force': '强制更新模式',
+                    'verify': '验证模式'
+                }
+                
+                console.print()
+                console.print("[bold blue]🔐 哈希计算[/bold blue]")
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+                console.print(f"  计算模式      {mode_names.get(mode, mode)}")
+                console.print(f"  哈希算法      {HASH_ALGORITHM}")
                 if group_ids:
-                    print(f"指定组ID: {', '.join(map(str, group_ids))}")
+                    console.print(f"  指定组ID      {', '.join(map(str, group_ids))}")
                 if filters:
-                    print(f"过滤条件: {filters}")
-                print(f"重复文件组数量: {total_groups}")
-                print(f"待处理文件数量: {total_files} 个")
-                print(f"待处理文件总大小: {self.format_size(total_size)}")
-                print("=" * 80)
+                    console.print(f"  过滤条件      {filters}")
+                console.print(f"  开始时间      {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                console.print()
+                console.print(f"  重复文件组    [bold]{total_groups:,}[/bold] 组")
+                console.print(f"  待处理文件    [bold]{total_files:,}[/bold] 个")
+                console.print(f"  待处理大小    [bold]{self.format_size(total_size)}[/bold]")
+                console.print()
             
             if total_groups == 0:
                 if not self.quiet:
-                    print("\n没有需要处理的文件")
+                    console.print("  [yellow]没有需要处理的文件[/yellow]")
+                    console.print()
                 return
             
-            # 按组处理
             for group_idx, (group_id, extension, size, file_count) in enumerate(groups, 1):
                 if not self.quiet:
-                    print(f"\n{'=' * 80}")
-                    print(f"处理第 {group_idx}/{total_groups} 组 (Group_ID: {group_id})")
-                    print(f"扩展名: {extension}, 文件大小: {self.format_size(size)}, 文件数量: {file_count}")
-                    print(f"{'=' * 80}")
+                    sys.stdout.write("\r")
+                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
+                    sys.stdout.write(f"  \033[33m⏳ 处理进度\033[0m\n")
+                    sys.stdout.write(f"  第 {group_idx}/{total_groups} 组 (ID: {group_id})    扩展名: {extension}    大小: {self.format_size(size)}    文件数: {file_count}\n")
+                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
+                    sys.stdout.write(f"  \033[36m💾 正在计算\033[0m\n")
+                    sys.stdout.flush()
                 
-                # 处理这个组
                 self.process_group(group_id, mode, total_files, total_size)
             
             elapsed = time.time() - self.start_time
             
-            # 显示完成信息
             if not self.quiet:
-                print("\n" + "=" * 80)
-                print("哈希计算完成！")
-                print("=" * 80)
-                print(f"总处理文件数: {self.total_processed} 个")
-                print(f"总处理大小: {self.format_size(self.total_size_processed)}")
-                print(f"计算哈希文件数: {self.total_calculated} 个")
-                print(f"计算哈希大小: {self.format_size(self.total_size_calculated)}")
-                print(f"跳过文件数: {self.total_skipped} 个")
-                print(f"耗时: {elapsed:.2f} 秒")
+                console.print()
+                console.print()
+                console.print("[bold green]✅ 哈希计算完成[/bold green]")
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+                console.print(f"  总处理文件数      [bold]{self.total_processed:,}[/bold] 个")
+                console.print(f"  总处理大小        [bold]{self.format_size(self.total_size_processed)}[/bold]")
+                console.print(f"  计算哈希文件数    [bold]{self.total_calculated:,}[/bold] 个")
+                console.print(f"  计算哈希大小      [bold]{self.format_size(self.total_size_calculated)}[/bold]")
+                console.print(f"  跳过文件数        [bold]{self.total_skipped:,}[/bold] 个")
+                console.print(f"  耗时              [bold]{elapsed:.2f}[/bold] 秒")
                 
                 if elapsed > 0:
                     speed_files = self.total_processed / elapsed
                     speed_size = self.total_size_processed / elapsed
-                    print(f"平均速度: {speed_files:.1f} 文件/秒 ({self.format_size(speed_size)}/秒)")
-                print("=" * 80)
+                    console.print(f"  平均速度          [bold]{speed_files:.0f}[/bold] 文件/秒 ([bold]{self.format_size(speed_size)}[/bold]/秒)")
+                console.print()
         finally:
             if conn:
                 conn.close()
@@ -209,9 +221,7 @@ class HashCalculator:
             conn = self.get_connection()
             cursor = conn.cursor()
             
-            # 获取该组的所有文件
             if mode == 'new':
-                # 仅新增模式：只获取从未计算过哈希值的文件
                 cursor.execute('''
                     SELECT df.Filepath, f.Size, f.Modified
                     FROM duplicate_files df
@@ -219,7 +229,6 @@ class HashCalculator:
                     WHERE df.Group_ID = ? AND df.Filepath NOT IN (SELECT Filepath FROM file_hash)
                 ''', (group_id,))
             else:
-                # 默认模式和强制更新模式：获取所有文件
                 cursor.execute('''
                     SELECT df.Filepath, f.Size, f.Modified
                     FROM duplicate_files df
@@ -230,41 +239,33 @@ class HashCalculator:
             files = cursor.fetchall()
             
             if not files:
-                if not self.quiet:
-                    print("该组没有需要处理的文件")
                 return
             
-            # 获取已计算的哈希值
             file_paths = [file[0] for file in files]
             placeholders = ','.join(['?'] * len(file_paths))
             cursor.execute(f'SELECT Filepath, Size, Modified FROM file_hash WHERE Filepath IN ({placeholders})', file_paths)
             existing_hashes = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
             
-            # 计算哈希值
             results = []
             for file_path, file_size, file_modified in files:
-                # 显示即将处理的文件（不换行）
                 if not self.quiet:
-                    print(f"正在处理: {self.format_size(file_size):>10s}  {file_path} ... ", end='', flush=True)
+                    short_path = file_path
+                    if len(short_path) > 60:
+                        short_path = "..." + short_path[-57:]
+                    sys.stdout.write(f"    {self.format_size(file_size):>10s}  {short_path}\n")
+                    sys.stdout.flush()
                 
-                # 检查是否需要跳过计算
                 should_skip = False
                 
                 if mode == 'new':
-                    # 仅新增模式：如果file_hash表里有该文件的记录，就跳过
                     if file_path in existing_hashes:
                         should_skip = True
-                        if not self.quiet:
-                            print("跳过（已有哈希记录）")
                         self.total_skipped += 1
                 elif mode == 'force':
-                    # 强制更新模式：不跳过，重新计算
                     pass
                 else:
-                    # 默认模式：如果文件没有变化，跳过计算
                     if file_path in existing_hashes:
                         existing_size, existing_modified = existing_hashes[file_path]
-                        # 确保类型一致
                         if isinstance(existing_modified, str):
                             try:
                                 dt = datetime.fromisoformat(existing_modified)
@@ -274,8 +275,6 @@ class HashCalculator:
                         
                         if existing_size == file_size and abs(existing_modified - file_modified) < 0.001:
                             should_skip = True
-                            if not self.quiet:
-                                print("跳过（文件未变更）")
                             self.total_skipped += 1
                 
                 if should_skip:
@@ -283,36 +282,26 @@ class HashCalculator:
                     self.total_size_processed += file_size
                     continue
                 
-                # 计算哈希值
                 hash_value = self.calculate_file_hash(file_path)
                 
                 if hash_value:
                     results.append((file_path, file_size, file_modified, hash_value))
-                    if not self.quiet:
-                        print(f"完成 (Hash: {hash_value[:16]}...)")
                     self.total_calculated += 1
                     self.total_size_calculated += file_size
-                else:
-                    if not self.quiet:
-                        print("失败")
                 
                 self.total_processed += 1
                 self.total_size_processed += file_size
             
-            # 批量插入或更新哈希值
             if results:
                 for file_path, file_size, file_modified, hash_value in results:
-                    # 检查是否已存在记录
                     cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Filepath = ?', (file_path,))
                     if cursor.fetchone()[0] > 0:
-                        # 更新现有记录
                         cursor.execute('''
                             UPDATE file_hash 
                             SET Size = ?, Modified = ?, Hash = ?, created_at = datetime('now')
                             WHERE Filepath = ?
                         ''', (file_size, file_modified, hash_value, file_path))
                     else:
-                        # 插入新记录
                         cursor.execute('''
                             INSERT INTO file_hash (Filepath, Size, Modified, Hash, created_at)
                             VALUES (?, ?, ?, ?, datetime('now'))
@@ -320,7 +309,6 @@ class HashCalculator:
                 
                 conn.commit()
                 
-                # 更新duplicate_groups表的Hash字段
                 self._update_group_hash(cursor, conn, group_id)
         finally:
             if conn:
@@ -355,7 +343,10 @@ def calc(
     size: Optional[str] = typer.Option(None, "--size", "-s", help="按大小过滤 (例如: >1G, <100M, =1K)"),
     path: Optional[str] = typer.Option(None, "--path", "-p", help="按路径过滤")
 ):
-    """计算文件哈希值"""
+    """[bold]计算文件哈希值[/bold]
+    
+    [dim]计算重复文件组中文件的哈希值[/dim]
+    """
     mode = 'default'
     group_ids = None
     filters = {}
@@ -374,7 +365,7 @@ def calc(
         try:
             group_ids = [int(gid) for gid in group_id.split(',')]
         except ValueError:
-            typer.echo(f"错误: 无效的组ID: {group_id}")
+            console.print(f"[red]错误: 无效的组ID: {group_id}[/red]")
             return
     
     calculator = HashCalculator()
@@ -385,14 +376,17 @@ def calc(
 def verify(
     group_id: Optional[str] = typer.Option(None, "--group", "-g", help="指定组ID验证")
 ):
-    """验证文件哈希值"""
+    """[bold]验证文件哈希值[/bold]
+    
+    [dim]验证已有哈希值是否正确[/dim]
+    """
     group_ids = None
     
     if group_id:
         try:
             group_ids = [int(gid) for gid in group_id.split(',')]
         except ValueError:
-            typer.echo(f"错误: 无效的组ID: {group_id}")
+            console.print(f"[red]错误: 无效的组ID: {group_id}[/red]")
             return
     
     calculator = HashCalculator()
@@ -401,11 +395,13 @@ def verify(
 
 @app.command()
 def status():
-    """显示哈希计算状态"""
+    """[bold]显示哈希计算状态[/bold]
+    
+    [dim]显示哈希计算的进度和统计信息[/dim]
+    """
     conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
-    # 获取统计信息
     cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
     total_groups = cursor.fetchone()[0]
     
@@ -426,20 +422,35 @@ def status():
     
     conn.close()
     
-    typer.echo("\n哈希计算状态")
-    typer.echo("=" * 60)
-    typer.echo(f"重复文件组总数: {total_groups}")
-    typer.echo(f"  - 已计算哈希: {hashed_groups}")
-    typer.echo(f"  - 未计算哈希: {total_groups - hashed_groups}")
-    typer.echo(f"\n重复文件总数: {total_files}")
-    typer.echo(f"  - 已计算哈希: {hashed_files}")
-    typer.echo(f"  - 未计算哈希: {unhashed_files}")
+    def print_progress_bar(progress, width=30):
+        filled = int(progress / 100 * width)
+        return f"[green]{'█' * filled}[/green][dim]{'░' * (width - filled)}[/dim]"
+    
+    console.print()
+    console.print("[bold blue]📊 哈希计算状态[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    
+    console.print("  [bold]📁 重复文件组[/bold]")
+    console.print(f"    总数          [bold]{total_groups:,}[/bold]")
+    console.print(f"    已计算哈希    [green]{hashed_groups:,}[/green]")
+    console.print(f"    未计算哈希    [yellow]{total_groups - hashed_groups:,}[/yellow]")
     
     if total_groups > 0:
         progress = (hashed_groups / total_groups) * 100
-        typer.echo(f"\n总体进度: {progress:.1f}%")
+        console.print(f"    进度          {print_progress_bar(progress)} [bold]{progress:.1f}%[/bold]")
     
-    typer.echo("=" * 60)
+    console.print()
+    console.print("  [bold]📄 重复文件[/bold]")
+    console.print(f"    总数          [bold]{total_files:,}[/bold]")
+    console.print(f"    已计算哈希    [green]{hashed_files:,}[/green]")
+    console.print(f"    未计算哈希    [yellow]{unhashed_files:,}[/yellow]")
+    
+    if total_files > 0:
+        progress = (hashed_files / total_files) * 100
+        console.print(f"    进度          {print_progress_bar(progress)} [bold]{progress:.1f}%[/bold]")
+    
+    console.print()
 
 
 @app.command()
@@ -447,16 +458,28 @@ def clear(
     group_id: Optional[str] = typer.Option(None, "--group", "-g", help="清除指定组的哈希值"),
     all: bool = typer.Option(False, "--all", "-a", help="清除所有哈希值")
 ):
-    """清除哈希值"""
+    """[bold]清除哈希值[/bold]
+    
+    [dim]清除已计算的哈希值[/dim]
+    """
     if not group_id and not all:
-        typer.echo("错误: 请指定 --group 或 --all 选项")
+        console.print()
+        console.print("[bold blue]🗑️ 清除哈希值[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print("  [red]错误: 请指定 --group 或 --all 选项[/red]")
+        console.print()
         return
     
     conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
+    console.print()
+    console.print("[bold blue]🗑️ 清除哈希值[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    
     if all:
-        # 清除所有哈希值
         cursor.execute('SELECT COUNT(*) FROM file_hash')
         count = cursor.fetchone()[0]
         
@@ -464,13 +487,12 @@ def clear(
         cursor.execute("UPDATE duplicate_groups SET Hash = NULL")
         conn.commit()
         
-        typer.echo(f"已清除所有哈希值（共 {count} 条记录）")
+        console.print(f"  [green]✅ 已清除所有哈希值[/green]")
+        console.print(f"  共清除 [bold]{count:,}[/bold] 条记录")
     elif group_id:
-        # 清除指定组的哈希值
         try:
             gid = int(group_id)
             
-            # 获取该组的文件
             cursor.execute('SELECT Filepath FROM duplicate_files WHERE Group_ID = ?', (gid,))
             files = [row[0] for row in cursor.fetchall()]
             
@@ -480,12 +502,14 @@ def clear(
                 cursor.execute("UPDATE duplicate_groups SET Hash = NULL WHERE ID = ?", (gid,))
                 conn.commit()
                 
-                typer.echo(f"已清除组 {gid} 的哈希值（共 {len(files)} 个文件）")
+                console.print(f"  [green]✅ 已清除组 {gid} 的哈希值[/green]")
+                console.print(f"  共清除 [bold]{len(files):,}[/bold] 个文件")
             else:
-                typer.echo(f"组 {gid} 没有文件")
+                console.print(f"  [yellow]组 {gid} 没有文件[/yellow]")
         except ValueError:
-            typer.echo(f"错误: 无效的组ID: {group_id}")
+            console.print(f"  [red]错误: 无效的组ID: {group_id}[/red]")
     
+    console.print()
     conn.close()
 
 
@@ -494,13 +518,15 @@ def backup(
     backup_path: str = typer.Argument(..., help="备份文件路径"),
     format: str = typer.Option("csv", "--format", "-f", help="备份格式: csv 或 json")
 ):
-    """备份哈希值到文件"""
+    """[bold]备份哈希值[/bold]
+    
+    [dim]将哈希值备份到文件[/dim]
+    """
     import csv
     import json
     
     backup_path = os.path.abspath(backup_path)
     
-    # 自动添加扩展名
     if format == "csv" and not backup_path.endswith('.csv'):
         backup_path += '.csv'
     elif format == "json" and not backup_path.endswith('.json'):
@@ -509,19 +535,16 @@ def backup(
     conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
-    # 获取所有哈希值
     cursor.execute('SELECT Filepath, Size, Modified, Hash, created_at FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
     rows = cursor.fetchall()
     conn.close()
     
     if format == "csv":
-        # CSV格式备份
         with open(backup_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['Filepath', 'Size', 'Modified', 'Hash', 'created_at'])
             writer.writerows(rows)
     elif format == "json":
-        # JSON格式备份
         data = []
         for row in rows:
             data.append({
@@ -534,8 +557,14 @@ def backup(
         with open(backup_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
-    typer.echo(f"哈希值已备份到: {backup_path}")
-    typer.echo(f"  共备份 {len(rows)} 条记录")
+    console.print()
+    console.print("[bold blue]💾 备份哈希值[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    console.print(f"  [green]✅ 哈希值已备份[/green]")
+    console.print(f"  备份路径    {backup_path}")
+    console.print(f"  备份记录    [bold]{len(rows):,}[/bold] 条")
+    console.print()
 
 
 @app.command()
@@ -544,17 +573,24 @@ def restore(
     format: str = typer.Option("auto", "--format", "-f", help="备份格式: auto, csv 或 json"),
     merge: bool = typer.Option(False, "--merge", "-m", help="合并模式（保留现有数据）")
 ):
-    """从文件还原哈希值"""
+    """[bold]还原哈希值[/bold]
+    
+    [dim]从备份文件还原哈希值[/dim]
+    """
     import csv
     import json
     
     backup_path = os.path.abspath(backup_path)
     
     if not os.path.exists(backup_path):
-        typer.echo(f"错误: 备份文件不存在: {backup_path}")
+        console.print()
+        console.print("[bold blue]📥 还原哈希值[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  [red]错误: 备份文件不存在: {backup_path}[/red]")
+        console.print()
         return
     
-    # 自动检测格式
     if format == "auto":
         if backup_path.endswith('.json'):
             format = "json"
@@ -564,26 +600,32 @@ def restore(
     conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
-    # 清空现有数据（非合并模式）
+    console.print()
+    console.print("[bold blue]📥 还原哈希值[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    console.print(f"  备份文件    {backup_path}")
+    console.print(f"  文件格式    {format.upper()}")
+    console.print(f"  还原模式    {'合并模式' if merge else '覆盖模式'}")
+    console.print()
+    
     if not merge:
         cursor.execute('DELETE FROM file_hash')
-        typer.echo("已清空现有哈希值数据")
+        console.print("  已清空现有哈希值数据")
     
     imported_count = 0
     skipped_count = 0
     
     if format == "csv":
-        # CSV格式还原
         with open(backup_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
-            header = next(reader)  # 跳过表头
+            header = next(reader)
             
             for row in reader:
                 if len(row) >= 4:
                     filepath, size, modified, hash_val = row[0], row[1], row[2], row[3]
                     created_at = row[4] if len(row) > 4 else None
                     
-                    # 检查是否已存在
                     cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Filepath = ?', (filepath,))
                     if cursor.fetchone()[0] > 0:
                         if merge:
@@ -602,7 +644,6 @@ def restore(
                         imported_count += 1
     
     elif format == "json":
-        # JSON格式还原
         with open(backup_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -633,14 +674,16 @@ def restore(
     
     conn.commit()
     
-    # 统计结果
     cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
     total_count = cursor.fetchone()[0]
     
     conn.close()
     
-    typer.echo(f"哈希值已从 {backup_path} 还原")
-    typer.echo(f"  导入记录: {imported_count}")
+    console.print()
+    console.print("  [dim]───────────────────────────────────────────────[/dim]")
+    console.print("  [green]✅ 哈希值已还原[/green]")
+    console.print(f"  导入记录    [bold]{imported_count:,}[/bold] 条")
     if skipped_count > 0:
-        typer.echo(f"  跳过记录: {skipped_count}")
-    typer.echo(f"  当前总记录数: {total_count}")
+        console.print(f"  跳过记录    [yellow]{skipped_count:,}[/yellow] 条")
+    console.print(f"  当前总数    [bold]{total_count:,}[/bold] 条")
+    console.print()

@@ -6,12 +6,14 @@ import csv
 import hashlib
 import mmap
 import re
+import sys
 from typing import Optional
 from datetime import datetime
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from commands.config import ConfigManager
 from commands.db import get_db_path
 
-# 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:
     import xxhash
     HASH_ALGORITHM = 'xxhash'
@@ -25,6 +27,8 @@ except ImportError:
         return hashlib.md5()
     def get_hash_hexdigest(hasher):
         return hasher.hexdigest()
+
+console = Console()
 
 class FileScanner:
     def __init__(self, db_path=None):
@@ -109,7 +113,6 @@ class FileScanner:
     
     def scan_directory(self, path):
         """扫描指定路径下的所有文件（优化方案二：流式处理）"""
-        # 确保路径是绝对路径
         path = os.path.abspath(path)
 
         conn = self.get_connection()
@@ -119,16 +122,35 @@ class FileScanner:
         self.total_indexed = 0
         self.start_time = time.time()
 
-        print(f"开始扫描路径: {path}")
+        def format_size(size):
+            if size >= 1073741824:
+                return f"{size/1073741824:.2f} GB"
+            elif size >= 1048576:
+                return f"{size/1048576:.2f} MB"
+            elif size >= 1024:
+                return f"{size/1024:.2f} KB"
+            else:
+                return f"{size} B"
+
+        console.print()
+        console.print("[bold blue]📂 扫描文件[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  扫描路径    {path}")
+        console.print(f"  开始时间    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        console.print()
         
-        # 优化方案二：使用固定大小的缓冲区进行流式处理
         buffer_size = 5000
         buffer = []
+        current_dir = ""
         
         for root, dirs, files in os.walk(path):
             for file in files:
                 file_path = os.path.join(root, file)
                 self.total_scanned += 1
+                
+                if root != current_dir:
+                    current_dir = root
                 
                 if self.is_path_excluded(file_path):
                     continue
@@ -138,7 +160,6 @@ class FileScanner:
                     buffer.append(file_info)
                     self.total_indexed += 1
                 
-                # 缓冲区满时写入数据库
                 if len(buffer) >= buffer_size:
                     self._flush_buffer(cursor, conn, buffer)
                     buffer = []
@@ -147,20 +168,32 @@ class FileScanner:
                     current_time = time.time()
                     elapsed = current_time - self.start_time
                     speed = self.total_scanned / elapsed if elapsed > 0 else 0
-                    print(f"已扫描: {self.total_scanned} 文件, 已索引: {self.total_indexed} 文件 ({speed:.1f} 文件/秒)")
+                    
+                    sys.stdout.write("\r")
+                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
+                    sys.stdout.write(f"  \033[33m⏳ 扫描进度\033[0m\n")
+                    sys.stdout.write(f"  已扫描 {self.total_scanned:,} 文件    已索引 {self.total_indexed:,} 文件    速度 {speed:.0f} 文件/秒\n")
+                    sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
+                    sys.stdout.write(f"  \033[36m💾 当前目录\033[0m\n")
+                    sys.stdout.write(f"  {current_dir}")
+                    sys.stdout.flush()
         
-        # 写入剩余数据
         if buffer:
             self._flush_buffer(cursor, conn, buffer)
         
         elapsed = time.time() - self.start_time
         speed = self.total_scanned / elapsed if elapsed > 0 else 0
         
-        print(f"\n扫描完成！")
-        print(f"总扫描文件数: {self.total_scanned}")
-        print(f"总索引文件数: {self.total_indexed}")
-        print(f"耗时: {elapsed:.2f} 秒")
-        print(f"平均速度: {speed:.1f} 文件/秒")
+        console.print()
+        console.print()
+        console.print("[bold green]✅ 扫描完成[/bold green]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  总扫描文件数      [bold]{self.total_scanned:,}[/bold]")
+        console.print(f"  总索引文件数      [bold]{self.total_indexed:,}[/bold]")
+        console.print(f"  耗时              [bold]{elapsed:.2f}[/bold] 秒")
+        console.print(f"  平均速度          [bold]{speed:.0f}[/bold] 文件/秒")
+        console.print()
         
         conn.close()
     
@@ -173,9 +206,15 @@ class FileScanner:
         self.total_indexed = 0
         self.start_time = time.time()
         
-        print(f"开始从CSV文件导入: {csv_path} (编码: {encoding})")
+        console.print()
+        console.print("[bold blue]📄 导入CSV文件[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  CSV文件    {csv_path}")
+        console.print(f"  编码       {encoding}")
+        console.print(f"  开始时间   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        console.print()
         
-        # 优化方案二：使用固定大小的缓冲区进行流式处理
         buffer_size = 5000
         buffer = []
         
@@ -189,7 +228,6 @@ class FileScanner:
                     if not filename or not os.path.exists(filename):
                         continue
 
-                    # 确保路径是绝对路径
                     filename = os.path.abspath(filename)
 
                     if self.is_path_excluded(filename):
@@ -200,7 +238,6 @@ class FileScanner:
                         buffer.append(file_info)
                         self.total_indexed += 1
                     
-                    # 缓冲区满时写入数据库
                     if len(buffer) >= buffer_size:
                         self._flush_buffer(cursor, conn, buffer)
                         buffer = []
@@ -209,28 +246,36 @@ class FileScanner:
                         current_time = time.time()
                         elapsed = current_time - self.start_time
                         speed = self.total_scanned / elapsed if elapsed > 0 else 0
-                        print(f"已处理: {self.total_scanned} 文件, 已索引: {self.total_indexed} 文件 ({speed:.1f} 文件/秒)")
+                        
+                        sys.stdout.write("\r")
+                        sys.stdout.write(f"  \033[90m───────────────────────────────────────────────\033[0m\n")
+                        sys.stdout.write(f"  \033[33m⏳ 导入进度\033[0m\n")
+                        sys.stdout.write(f"  已处理 {self.total_scanned:,} 文件    已索引 {self.total_indexed:,} 文件    速度 {speed:.0f} 文件/秒")
+                        sys.stdout.flush()
         
         except Exception as e:
-            print(f"读取CSV文件失败: {e}")
-            # 写入已处理的数据
+            console.print(f"\n  [red]读取CSV文件失败: {e}[/red]")
             if buffer:
                 self._flush_buffer(cursor, conn, buffer)
             conn.close()
             return
         
-        # 写入剩余数据
         if buffer:
             self._flush_buffer(cursor, conn, buffer)
         
         elapsed = time.time() - self.start_time
         speed = self.total_scanned / elapsed if elapsed > 0 else 0
         
-        print(f"\nCSV导入完成！")
-        print(f"总处理文件数: {self.total_scanned}")
-        print(f"总索引文件数: {self.total_indexed}")
-        print(f"耗时: {elapsed:.2f} 秒")
-        print(f"平均速度: {speed:.1f} 文件/秒")
+        console.print()
+        console.print()
+        console.print("[bold green]✅ 导入完成[/bold green]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  总处理文件数      [bold]{self.total_scanned:,}[/bold]")
+        console.print(f"  总索引文件数      [bold]{self.total_indexed:,}[/bold]")
+        console.print(f"  耗时              [bold]{elapsed:.2f}[/bold] 秒")
+        console.print(f"  平均速度          [bold]{speed:.0f}[/bold] 文件/秒")
+        console.print()
         
         conn.close()
 
@@ -503,37 +548,25 @@ class IndexManager:
         """重建重复文件组（公共方法）
         
         扫描files表，按照扩展名和大小创建重复文件组
-        可以被其他脚本引用
         
         Returns:
             tuple: (groups_created, files_assigned) 创建的组数和分配的文件数
         """
-        print("\n" + "=" * 60)
-        print("重建重复文件组")
-        print("=" * 60)
-        
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
-            # 获取files表中的文件数量
             cursor.execute('SELECT COUNT(*) FROM files')
             total_files = cursor.fetchone()[0]
             
             if total_files == 0:
-                print("files表为空，无需重建")
                 conn.close()
                 return (0, 0)
             
-            print(f"files表中有 {total_files} 个文件")
-            
-            # 清理旧的重复文件组数据
             cursor.execute('DELETE FROM duplicate_files')
             cursor.execute('DELETE FROM duplicate_groups')
             conn.commit()
-            print("已清理旧的重复文件组数据")
             
-            # 查找重复文件（扩展名和大小都相同）
             cursor.execute('''
                 SELECT f.Filename, f.Extension, f.Size
                 FROM files f
@@ -549,11 +582,9 @@ class IndexManager:
             duplicate_files = cursor.fetchall()
             
             if not duplicate_files:
-                print("没有找到重复文件（扩展名和大小都相同的文件）")
                 conn.close()
                 return (0, 0)
             
-            # 按扩展名和大小分组
             groups = {}
             for filepath, ext, size in duplicate_files:
                 key = (ext, size)
@@ -561,7 +592,6 @@ class IndexManager:
                     groups[key] = []
                 groups[key].append(filepath)
             
-            # 插入重复文件组（Hash字段为空，等待index hash计算）
             groups_created = 0
             files_assigned = 0
             
@@ -582,20 +612,13 @@ class IndexManager:
             
             conn.commit()
             
-            print(f"\n重复文件组重建完成！")
-            print(f"创建了 {groups_created} 个重复文件组")
-            print(f"共有 {files_assigned} 个文件被分配到组中")
-            
             return (groups_created, files_assigned)
             
         except Exception as e:
-            print(f"重建重复文件组时出错: {e}")
             conn.rollback()
             return (0, 0)
         finally:
             conn.close()
-        
-        print("=" * 60)
     
     def _rebuild_duplicate_groups_internal(self, cursor):
         """重建重复文件组（内部方法，供clean_index使用）
@@ -651,39 +674,58 @@ class IndexManager:
         print(f"创建了 {len(groups)} 个重复文件组")
         print(f"共有 {len(duplicate_files)} 个文件被分配到组中")
 
-app = typer.Typer()
+app = typer.Typer(
+    name="index",
+    help="[bold blue]📁 索引管理[/bold blue]",
+    rich_markup_mode=True
+)
 
 @app.command()
 def scan(path: str):
-    """扫描指定路径，将文件放入files表，扫描后会自动重建重复文件组"""
+    """[bold]扫描指定路径[/bold]
+    
+    [dim]扫描目录并将文件放入索引，扫描后会自动重建重复文件组[/dim]
+    """
     if not os.path.exists(path) or not os.path.isdir(path):
-        typer.echo(f"错误: 路径不存在或不是目录: {path}")
+        console.print(f"[red]错误: 路径不存在或不是目录: {path}[/red]")
         return
     
     scanner = FileScanner()
     scanner.scan_directory(path)
     
-    # 自动重建重复文件组
     _rebuild_duplicate_groups()
 
 @app.command(name="import")
 def import_csv(csv_path: str, encoding: str = "utf-8"):
-    """从CSV文件导入文件列表，导入后会自动重建重复文件组"""
+    """[bold]从CSV文件导入[/bold]
+    
+    [dim]从CSV文件导入文件列表，导入后会自动重建重复文件组[/dim]
+    """
     if not os.path.exists(csv_path) or not os.path.isfile(csv_path):
-        typer.echo(f"错误: CSV文件不存在: {csv_path}")
+        console.print(f"[red]错误: CSV文件不存在: {csv_path}[/red]")
         return
     
     scanner = FileScanner()
     scanner.scan_from_csv(csv_path, encoding)
     
-    # 自动重建重复文件组
     _rebuild_duplicate_groups()
 
 @app.command()
 def rebuild():
-    """检查并清理索引文件，然后重建重复文件组"""
+    """[bold]重建重复文件组[/bold]
+    
+    [dim]检查并清理索引文件，然后重建重复文件组[/dim]
+    """
+    console.print()
+    console.print("[bold blue]🔄 重建重复文件组[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    console.print("  检查并清理索引文件...")
+    
     manager = IndexManager()
     manager.clean_index()
+    
+    console.print("  重建重复文件组...")
     _rebuild_duplicate_groups()
 
 @app.command()
@@ -692,43 +734,58 @@ def clear(
     force: bool = typer.Option(False, "--force", "-f", help="强制清理，不询问"),
     all: bool = typer.Option(False, "--all", "-a", help="清除所有文件索引")
 ):
-    """清除文件索引（保留哈希值，哈希值请使用 hash clear 清除）
+    """[bold]清除文件索引[/bold]
     
-    示例:
-        index clear --all                    # 清除所有文件索引
-        index clear "*.tmp"                  # 清除匹配通配符的文件
-        index clear "e:/downloads"           # 清除指定路径下的文件
-        index clear "e:/downloads/*.tmp"     # 清除指定路径下匹配通配符的文件
+    [dim]清除文件索引（保留哈希值，哈希值请使用 hash clear 清除）[/dim]
+    
+    [dim]示例:[/dim]
+      [dim]index clear --all                    # 清除所有文件索引[/dim]
+      [dim]index clear "*.tmp"                  # 清除匹配通配符的文件[/dim]
+      [dim]index clear "e:/downloads"           # 清除指定路径下的文件[/dim]
     """
     manager = IndexManager()
     
+    console.print()
+    console.print("[bold blue]🗑️ 清除文件索引[/bold blue]")
+    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    
     if all:
-        # 清除所有文件索引
         if not force:
-            typer.echo("这将清除所有文件索引，但保留哈希值")
-            typer.echo("哈希值可使用 hash clear 命令清除")
-            typer.echo("使用 --force 选项跳过确认")
+            console.print("  [yellow]⚠️  这将清除所有文件索引，但保留哈希值[/yellow]")
+            console.print("  哈希值可使用 hash clear 命令清除")
+            console.print("  使用 --force 选项跳过确认")
             return
         manager.clean_files()
+        console.print("  [green]✅ 已清除所有文件索引[/green]")
     elif pattern:
-        # 按模式或路径清除
         if not force:
-            typer.echo(f"这将清除匹配 '{pattern}' 的文件索引，但保留哈希值")
-            typer.echo("哈希值可使用 hash clear 命令清除")
-            typer.echo("使用 --force 选项跳过确认")
+            console.print(f"  [yellow]⚠️  这将清除匹配 '{pattern}' 的文件索引，但保留哈希值[/yellow]")
+            console.print("  哈希值可使用 hash clear 命令清除")
+            console.print("  使用 --force 选项跳过确认")
             return
         manager.clean_files_by_pattern(pattern)
+        console.print(f"  [green]✅ 已清除匹配 '{pattern}' 的文件索引[/green]")
     else:
-        typer.echo("错误: 请指定 --all 或提供匹配模式")
-        typer.echo("示例:")
-        typer.echo("  index clear --all              # 清除所有")
-        typer.echo("  index clear '*.tmp'            # 按通配符清除")
-        typer.echo("  index clear 'e:/downloads'     # 按路径清除")
+        console.print("  [red]错误: 请指定 --all 或提供匹配模式[/red]")
+        console.print()
+        console.print("  [dim]示例:[/dim]")
+        console.print("    [dim]index clear --all              # 清除所有[/dim]")
+        console.print("    [dim]index clear '*.tmp'            # 按通配符清除[/dim]")
+        console.print("    [dim]index clear 'e:/downloads'     # 按路径清除[/dim]")
+    
+    console.print()
 
-# 辅助函数
 def _rebuild_duplicate_groups():
     """重建重复文件组"""
     index_manager = IndexManager()
-    index_manager.rebuild_duplicate_groups()
+    groups_count, files_count = index_manager.rebuild_duplicate_groups()
+    
+    console.print()
+    console.print("  [dim]───────────────────────────────────────────────[/dim]")
+    console.print("  🔄 正在重建重复文件组...")
+    console.print(f"  [green]✅ 创建了 {groups_count:,} 个重复文件组[/green]")
+    console.print(f"  共有 {files_count:,} 个文件被分配到组中")
+    console.print()
 
 
