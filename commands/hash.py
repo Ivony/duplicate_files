@@ -11,6 +11,7 @@ import mmap
 from typing import Optional
 from datetime import datetime
 from commands.config import ConfigManager
+from commands.db_config import get_db_path
 
 # 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:
@@ -30,8 +31,8 @@ except ImportError:
 app = typer.Typer(help="哈希计算和验证指令")
 
 class HashCalculator:
-    def __init__(self, db_path='file_index.db', quiet=False):
-        self.db_path = db_path
+    def __init__(self, db_path=None, quiet=False):
+        self.db_path = db_path or get_db_path()
         self.quiet = quiet
         self.total_processed = 0
         self.total_calculated = 0
@@ -376,7 +377,7 @@ def calc(
             typer.echo(f"错误: 无效的组ID: {group_id}")
             return
     
-    calculator = HashCalculator('file_index.db')
+    calculator = HashCalculator()
     calculator.calculate_hash(mode, group_ids, filters)
 
 
@@ -394,14 +395,14 @@ def verify(
             typer.echo(f"错误: 无效的组ID: {group_id}")
             return
     
-    calculator = HashCalculator('file_index.db')
+    calculator = HashCalculator()
     calculator.calculate_hash('verify', group_ids, {})
 
 
 @app.command()
 def status():
     """显示哈希计算状态"""
-    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
     # 获取统计信息
@@ -451,7 +452,7 @@ def clear(
         typer.echo("错误: 请指定 --group 或 --all 选项")
         return
     
-    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
     if all:
@@ -505,7 +506,7 @@ def backup(
     elif format == "json" and not backup_path.endswith('.json'):
         backup_path += '.json'
     
-    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
     # 获取所有哈希值
@@ -560,7 +561,7 @@ def restore(
         else:
             format = "csv"
     
-    conn = sqlite3.connect('file_index.db', timeout=30.0)
+    conn = sqlite3.connect(get_db_path(), timeout=30.0)
     cursor = conn.cursor()
     
     # 清空现有数据（非合并模式）

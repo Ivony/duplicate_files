@@ -4,10 +4,11 @@ import sqlite3
 import csv
 import json
 from datetime import datetime
+from commands.db_config import get_db_path
 
 class ExportManager:
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
     
     def get_connection(self):
         """获取数据库连接"""
@@ -255,7 +256,7 @@ def csv(
 ):
     """导出分析结果为CSV格式"""
     output_path = os.path.abspath(output_path)
-    exporter = ExportManager('file_index.db')
+    exporter = ExportManager()
     exporter.export_csv(output_path)
 
 @app.command()
@@ -264,7 +265,7 @@ def json(
 ):
     """导出分析结果为JSON格式"""
     output_path = os.path.abspath(output_path)
-    exporter = ExportManager('file_index.db')
+    exporter = ExportManager()
     exporter.export_json(output_path)
 
 @app.command()
@@ -273,5 +274,5 @@ def report(
 ):
     """生成详细的重复文件报告"""
     output_path = os.path.abspath(output_path)
-    exporter = ExportManager('file_index.db')
+    exporter = ExportManager()
     exporter.generate_report(output_path)

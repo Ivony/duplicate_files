@@ -10,10 +10,9 @@ def temp_dir():
         yield tmpdir
 
 @pytest.fixture
-def temp_db():
+def temp_db(tmp_path):
     """创建临时数据库"""
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmpdb:
-        db_path = tmpdb.name
+    db_path = str(tmp_path / "test.db")
     
     # 初始化数据库
     conn = sqlite3.connect(db_path)
@@ -62,14 +61,27 @@ def temp_db():
     )
     ''')
     
+    # 创建config表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
     conn.commit()
     conn.close()
     
     yield db_path
-    
-    # 清理临时数据库文件
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+
+@pytest.fixture(autouse=True)
+def isolate_db(temp_db, monkeypatch):
+    """自动隔离数据库，确保测试不会影响实际数据库"""
+    import commands.db_config
+    monkeypatch.setattr(commands.db_config, 'DB_PATH', temp_db)
+    monkeypatch.setattr(commands.db_config, 'get_db_path', lambda: temp_db)
+    yield
 
 @pytest.fixture
 def test_files(temp_dir):

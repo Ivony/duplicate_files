@@ -9,6 +9,7 @@ import re
 from typing import Optional
 from datetime import datetime
 from commands.config import ConfigManager
+from commands.db_config import get_db_path
 
 # 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:
@@ -26,8 +27,8 @@ except ImportError:
         return hasher.hexdigest()
 
 class FileScanner:
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
         self.total_scanned = 0
         self.total_indexed = 0
         self.start_time = 0
@@ -234,8 +235,8 @@ class FileScanner:
         conn.close()
 
 class IndexManager:
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
     
     def get_connection(self):
         """获取数据库连接"""
@@ -659,7 +660,7 @@ def scan(path: str):
         typer.echo(f"错误: 路径不存在或不是目录: {path}")
         return
     
-    scanner = FileScanner('file_index.db')
+    scanner = FileScanner()
     scanner.scan_directory(path)
     
     # 自动重建重复文件组
@@ -672,7 +673,7 @@ def import_csv(csv_path: str, encoding: str = "utf-8"):
         typer.echo(f"错误: CSV文件不存在: {csv_path}")
         return
     
-    scanner = FileScanner('file_index.db')
+    scanner = FileScanner()
     scanner.scan_from_csv(csv_path, encoding)
     
     # 自动重建重复文件组
@@ -681,7 +682,7 @@ def import_csv(csv_path: str, encoding: str = "utf-8"):
 @app.command()
 def rebuild():
     """检查并清理索引文件，然后重建重复文件组"""
-    manager = IndexManager('file_index.db')
+    manager = IndexManager()
     manager.clean_index()
     _rebuild_duplicate_groups()
 
@@ -699,7 +700,7 @@ def clear(
         index clear "e:/downloads"           # 清除指定路径下的文件
         index clear "e:/downloads/*.tmp"     # 清除指定路径下匹配通配符的文件
     """
-    manager = IndexManager('file_index.db')
+    manager = IndexManager()
     
     if all:
         # 清除所有文件索引
@@ -727,7 +728,7 @@ def clear(
 # 辅助函数
 def _rebuild_duplicate_groups():
     """重建重复文件组"""
-    index_manager = IndexManager('file_index.db')
+    index_manager = IndexManager()
     index_manager.rebuild_duplicate_groups()
 
 

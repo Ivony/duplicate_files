@@ -5,6 +5,7 @@ from datetime import datetime
 import hashlib
 import time
 import mmap
+from commands.db_config import get_db_path
 
 # 方案一：尝试导入 xxHash，如果失败则回退到 MD5
 try:
@@ -43,8 +44,8 @@ class HashCalculator:
     
     因此，请保持顺序计算，一个文件一个文件地处理，这样才能获得最佳性能。
     """
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
         self.total_processed = 0
         self.total_calculated = 0
         self.total_skipped = 0
@@ -640,8 +641,8 @@ class HashCalculator:
         return f"{size:.2f} PB"
 
 class FileCleaner:
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
         self.dryrun = False
         self.script_mode = False
         self.script_path = None
@@ -1115,7 +1116,7 @@ def run(
         typer.echo(f"支持的策略: {', '.join(SORT_STRATEGIES)}")
         return
     
-    cleaner = FileCleaner('file_index.db')
+    cleaner = FileCleaner()
     cleaner.dryrun = dryrun
     cleaner.auto_confirm = yes
     
@@ -1140,7 +1141,7 @@ def script(
         typer.echo(f"支持的策略: {', '.join(SORT_STRATEGIES)}")
         return
     
-    cleaner = FileCleaner('file_index.db')
+    cleaner = FileCleaner()
     cleaner.script_mode = True
     cleaner.script_path = output
     

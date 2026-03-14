@@ -3,11 +3,12 @@ import re
 import json
 import os
 import sqlite3
+from commands.db_config import get_db_path
 
 class ConfigManager:
-    def __init__(self, config_path='config.json', db_path='file_index.db'):
+    def __init__(self, config_path='config.json', db_path=None):
         self.config_path = config_path
-        self.db_path = db_path
+        self.db_path = db_path or get_db_path()
         # 先从JSON文件加载配置
         self.config = self._load_config_from_json()
         # 然后初始化数据库配置表（会同步JSON配置到数据库）

@@ -2,10 +2,11 @@ import typer
 import os
 import sqlite3
 from datetime import datetime
+from commands.db_config import get_db_path
 
 class DatabaseManager:
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
     
     def get_connection(self):
         """获取数据库连接"""
@@ -341,13 +342,13 @@ app = typer.Typer()
 @app.command()
 def check():
     """检查数据库结构和数据"""
-    db_manager = DatabaseManager('file_index.db')
+    db_manager = DatabaseManager()
     db_manager.check_database()
 
 @app.command()
 def optimize():
     """优化数据库性能"""
-    db_manager = DatabaseManager('file_index.db')
+    db_manager = DatabaseManager()
     db_manager.optimize_database()
 
 @app.command()
@@ -355,5 +356,5 @@ def init(
     force: bool = False
 ):
     """重建数据库结构，--force 强制重建，不询问"""
-    db_manager = DatabaseManager('file_index.db')
+    db_manager = DatabaseManager()
     db_manager.init_database(force)

@@ -6,12 +6,13 @@ from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich import box
+from commands.db_config import get_db_path
 
 class DataViewer:
     """数据查看器 - 提供查询和展示重复文件数据的功能"""
     
-    def __init__(self, db_path='file_index.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_db_path()
         self.path_limit = None
     
     def get_connection(self):
@@ -645,7 +646,7 @@ class DataViewer:
         return result
 
 app = typer.Typer()
-analyzer = DataViewer('file_index.db')
+analyzer = DataViewer()
 
 @app.command()
 def groups(
