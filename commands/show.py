@@ -17,58 +17,44 @@ class DataViewer:
         """获取数据库连接"""
         return sqlite3.connect(self.db_path, timeout=60.0, isolation_level='IMMEDIATE')
     
-    def get_statistics(self, hash_only=True):
+    def get_statistics(self):
         """获取统计信息
         
-        Args:
-            hash_only: 是否只统计已确认哈希值的组（Hash字段不为空）
+        返回全部组的统计和已确认哈希组的统计
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # 获取files表中的文件数量
         cursor.execute('SELECT COUNT(*) FROM files')
         total_files = cursor.fetchone()[0]
         
-        # 获取duplicate_groups表中的组数量
-        if hash_only:
-            cursor.execute("SELECT COUNT(*) FROM duplicate_groups WHERE Hash IS NOT NULL AND Hash != ''")
-        else:
-            cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
-        duplicate_groups = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM duplicate_groups')
+        total_groups = cursor.fetchone()[0]
         
-        # 获取duplicate_files表中的文件数量（只统计已确认哈希值的组中的文件）
-        if hash_only:
-            cursor.execute('''
-                SELECT COUNT(*) FROM duplicate_files df
-                INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
-                WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
-            ''')
-        else:
-            cursor.execute('SELECT COUNT(*) FROM duplicate_files')
-        duplicate_files = cursor.fetchone()[0]
-        
-        # 获取file_hash表中的文件数量
-        cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
-        hashed_files = cursor.fetchone()[0]
-        
-        # 获取待计算哈希值的文件数量
-        cursor.execute('SELECT COUNT(*) FROM duplicate_files WHERE Filepath NOT IN (SELECT Filepath FROM file_hash)')
-        unhashed_files = cursor.fetchone()[0]
-        
-        # 获取已计算哈希值的组数量
         cursor.execute("SELECT COUNT(*) FROM duplicate_groups WHERE Hash IS NOT NULL AND Hash != ''")
         hashed_groups = cursor.fetchone()[0]
         
-        # 获取未计算哈希值的组数量
-        cursor.execute("SELECT COUNT(*) FROM duplicate_groups WHERE Hash IS NULL OR Hash = ''")
-        unhashed_groups = cursor.fetchone()[0]
+        unhashed_groups = total_groups - hashed_groups
         
-        # 计算总大小
+        cursor.execute('SELECT COUNT(*) FROM duplicate_files')
+        total_duplicate_files = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM duplicate_files df
+            INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+            WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        ''')
+        confirmed_duplicate_files = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM file_hash WHERE Hash IS NOT NULL AND Hash != ""')
+        hashed_files = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM duplicate_files WHERE Filepath NOT IN (SELECT Filepath FROM file_hash)')
+        unhashed_files = cursor.fetchone()[0]
+        
         cursor.execute('SELECT SUM(Size) FROM files')
         total_size = cursor.fetchone()[0] or 0
         
-        # 计算重复文件总大小（默认按已计算哈希的组）
         cursor.execute('''
         SELECT SUM(duplicate_size)
         FROM (
@@ -80,72 +66,45 @@ class DataViewer:
             GROUP BY df.Group_ID
         )
         ''')
-        duplicate_size = cursor.fetchone()[0] or 0
+        savable_size = cursor.fetchone()[0] or 0
         
-        # 计算已计算哈希的文件总大小
         cursor.execute('''
         SELECT SUM(f.Size) FROM file_hash fh
         INNER JOIN files f ON fh.Filepath = f.Filename
-        WHERE fh.Hash IS NOT NULL AND fh.Hash != ''
+        WHERE fh.Hash IS NOT NULL AND fh.Hash != ""
         ''')
         hashed_size = cursor.fetchone()[0] or 0
         
-        # 计算duplicate_files中所有文件的总大小（用于计算哈希进度）
         cursor.execute('''
         SELECT SUM(f.Size) FROM duplicate_files df
         INNER JOIN files f ON df.Filepath = f.Filename
         ''')
         duplicate_files_total_size = cursor.fetchone()[0] or 0
         
-        # 计算平均重复度（每个重复组平均有多少个文件）
-        if hash_only:
-            cursor.execute('''
-            SELECT AVG(file_count) FROM (
-                SELECT COUNT(*) as file_count
-                FROM duplicate_files df
-                INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
-                WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
-                GROUP BY df.Group_ID
-            )
-            ''')
-        else:
-            cursor.execute('''
-            SELECT AVG(file_count) FROM (
-                SELECT COUNT(*) as file_count
-                FROM duplicate_files df
-                GROUP BY df.Group_ID
-            )
-            ''')
+        cursor.execute('''
+        SELECT AVG(file_count) FROM (
+            SELECT COUNT(*) as file_count
+            FROM duplicate_files df
+            GROUP BY df.Group_ID
+        )
+        ''')
         avg_duplication = cursor.fetchone()[0] or 0
         
-        # 计算平均重复组大小
-        if hash_only:
-            cursor.execute('''
-            SELECT AVG(dg.Size) FROM duplicate_groups dg
-            WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
-            ''')
-        else:
-            cursor.execute('SELECT AVG(Size) FROM duplicate_groups')
+        cursor.execute('SELECT AVG(Size) FROM duplicate_groups')
         avg_group_size = cursor.fetchone()[0] or 0
         
-        # 磁盘分布统计
         cursor.execute('''
         SELECT 
             UPPER(SUBSTR(f.Filename, 1, 2)) as disk,
-            COUNT(DISTINCT df.Group_ID) as group_count,
             COUNT(*) as file_count
-        FROM duplicate_files df
-        INNER JOIN files f ON df.Filepath = f.Filename
-        INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
-        WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        FROM files f
         GROUP BY disk
-        ORDER BY group_count DESC
+        ORDER BY file_count DESC
         ''')
         disk_distribution = {}
-        for disk, group_count, file_count in cursor.fetchall():
-            disk_distribution[disk] = {'group_count': group_count, 'file_count': file_count}
+        for disk, file_count in cursor.fetchall():
+            disk_distribution[disk] = {'file_count': file_count}
         
-        # 跨磁盘重复统计（一个组中的文件分布在多个磁盘上）
         cursor.execute('''
         SELECT COUNT(*) FROM (
             SELECT df.Group_ID
@@ -159,7 +118,6 @@ class DataViewer:
         ''')
         cross_disk_groups = cursor.fetchone()[0]
         
-        # 文件类型 Top 10（按可释放空间排序）
         cursor.execute('''
         SELECT 
             dg.Extension,
@@ -184,7 +142,6 @@ class DataViewer:
                 'savable_space': savable
             })
         
-        # 大小分布统计
         cursor.execute('''
         SELECT 
             CASE
@@ -210,7 +167,6 @@ class DataViewer:
         for range_name, group_count, savable in cursor.fetchall():
             size_distribution[range_name] = {'group_count': group_count, 'savable_space': savable}
         
-        # 数据库大小
         import os
         db_size = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
         
@@ -218,14 +174,15 @@ class DataViewer:
         
         return {
             'total_files': total_files,
-            'duplicate_groups': duplicate_groups,
-            'duplicate_files': duplicate_files,
-            'hashed_files': hashed_files,
-            'unhashed_files': unhashed_files,
+            'total_groups': total_groups,
             'hashed_groups': hashed_groups,
             'unhashed_groups': unhashed_groups,
+            'total_duplicate_files': total_duplicate_files,
+            'confirmed_duplicate_files': confirmed_duplicate_files,
+            'hashed_files': hashed_files,
+            'unhashed_files': unhashed_files,
             'total_size': total_size,
-            'duplicate_size': duplicate_size,
+            'savable_size': savable_size,
             'hashed_size': hashed_size,
             'duplicate_files_total_size': duplicate_files_total_size,
             'avg_duplication': avg_duplication,
@@ -1024,13 +981,9 @@ def stats(
             console.print(f"  {date:<15} [bold green]{count:,}[/bold green] 个组")
         console.print()
     else:
-        stats = analyzer.get_statistics(hash_only=True)
+        stats = analyzer.get_statistics()
         
         console.print()
-        
-        # ═══════════════════════════════════════════════════════════════════════════
-        # 文件统计信息
-        # ═══════════════════════════════════════════════════════════════════════════
         
         console.print("[bold blue]📄 文件统计信息[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
@@ -1041,7 +994,6 @@ def stats(
         console.print(f"  待计算哈希文件      [bold yellow]{stats['unhashed_files']:,}[/bold yellow]")
         console.print()
         
-        # 磁盘分布
         console.print("  [dim]───────────────────────────────────────────────[/dim]")
         console.print("  💿 磁盘分布")
         if stats['disk_distribution']:
@@ -1051,7 +1003,6 @@ def stats(
             console.print("    暂无数据")
         console.print()
         
-        # 哈希计算进度
         if stats['duplicate_files_total_size'] > 0:
             hash_progress = stats['hashed_size'] / stats['duplicate_files_total_size'] * 100
         else:
@@ -1063,60 +1014,47 @@ def stats(
         console.print(f"  {print_progress_bar(hash_progress)} [bold]{hash_progress:.1f}%[/bold]")
         console.print()
         
-        # ═══════════════════════════════════════════════════════════════════════════
-        # 重复组统计信息
-        # ═══════════════════════════════════════════════════════════════════════════
-        
-        total_groups = stats['hashed_groups'] + stats['unhashed_groups']
-        duplicate_rate = (stats['duplicate_files'] / stats['total_files'] * 100) if stats['total_files'] > 0 else 0
-        deletable_files = stats['duplicate_files'] - stats['hashed_groups']
+        duplicate_rate = (stats['total_duplicate_files'] / stats['total_files'] * 100) if stats['total_files'] > 0 else 0
+        deletable_files = stats['confirmed_duplicate_files'] - stats['hashed_groups']
         
         console.print("[bold blue]📁 重复组统计信息[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
-        console.print(f"  重复组总数          [bold]{total_groups:,}[/bold]")
-        console.print(f"  组内文件总数        [bold]{stats['duplicate_files']:,}[/bold]")
+        console.print(f"  重复组总数          [bold]{stats['total_groups']:,}[/bold]")
+        console.print(f"  组内文件总数        [bold]{stats['total_duplicate_files']:,}[/bold]")
         console.print(f"  已确认组            [bold green]{stats['hashed_groups']:,}[/bold green]")
         console.print(f"  待确认组            [bold yellow]{stats['unhashed_groups']:,}[/bold yellow]")
         console.print()
         
-        # 组详情
         console.print("  [dim]───────────────────────────────────────────────[/dim]")
         console.print(f"  平均组大小          {format_size_colored(stats['avg_group_size'])}")
         console.print(f"  平均组文件数        [bold]{stats['avg_duplication']:.2f}[/bold] 个")
-        avg_savable = stats['duplicate_size'] / stats['hashed_groups'] if stats['hashed_groups'] > 0 else 0
+        avg_savable = stats['savable_size'] / stats['hashed_groups'] if stats['hashed_groups'] > 0 else 0
         console.print(f"  平均可释放空间      {format_size_colored(avg_savable)}")
         console.print(f"  重复率              [bold yellow]{duplicate_rate:.2f}%[/bold yellow]")
         console.print()
         
-        # 组确认进度
-        if total_groups > 0:
-            group_progress = stats['hashed_groups'] / total_groups * 100
+        if stats['total_groups'] > 0:
+            group_progress = stats['hashed_groups'] / stats['total_groups'] * 100
         else:
             group_progress = 0
         
         console.print("  [dim]───────────────────────────────────────────────[/dim]")
         console.print("  ⏳ 组确认进度")
-        console.print(f"  已确认 {stats['hashed_groups']:,} / {total_groups:,} 组")
+        console.print(f"  已确认 {stats['hashed_groups']:,} / {stats['total_groups']:,} 组")
         console.print(f"  {print_progress_bar(group_progress)} [bold]{group_progress:.1f}%[/bold]")
         console.print()
         
-        # 可释放空间
         console.print("  [dim]───────────────────────────────────────────────[/dim]")
-        console.print("  💾 可释放空间")
-        console.print(f"  可删除 [bold red]{deletable_files:,}[/bold red] 个文件，节省 [bold green]{format_size(stats['duplicate_size'])}[/bold green]")
+        console.print("  💾 可释放空间（已确认组）")
+        console.print(f"  可删除 [bold red]{deletable_files:,}[/bold red] 个文件，节省 [bold green]{format_size(stats['savable_size'])}[/bold green]")
         console.print()
-        
-        # ═══════════════════════════════════════════════════════════════════════════
-        # 类型和大小分析
-        # ═══════════════════════════════════════════════════════════════════════════
         
         console.print("[bold blue]📊 类型和大小分析[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
         
-        # 按扩展名 Top 5
-        console.print("  📁 按扩展名 Top 5")
+        console.print("  📁 按扩展名 Top 5（已确认组）")
         if stats['top_extensions']:
             for ext_info in stats['top_extensions'][:5]:
                 console.print(f"    {ext_info['extension']:<10} {ext_info['group_count']:>5} 组    可释放 {format_size_colored(ext_info['savable_space'])}")
@@ -1124,9 +1062,8 @@ def stats(
             console.print("    暂无数据")
         console.print()
         
-        # 按大小分布
         console.print("  [dim]───────────────────────────────────────────────[/dim]")
-        console.print("  📏 按大小分布")
+        console.print("  📏 按大小分布（已确认组）")
         size_order = ['< 1MB', '1MB - 10MB', '10MB - 100MB', '100MB - 1GB', '> 1GB']
         if stats['size_distribution']:
             for range_name in size_order:
@@ -1136,10 +1073,6 @@ def stats(
         else:
             console.print("    暂无数据")
         console.print()
-        
-        # ═══════════════════════════════════════════════════════════════════════════
-        # 其他信息
-        # ═══════════════════════════════════════════════════════════════════════════
         
         console.print("[bold blue]📋 其他信息[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
