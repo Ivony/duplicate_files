@@ -1,8 +1,6 @@
 import typer
 from typing import Optional
 from commands import index, show, export, config, db, clean, hash as hash_cmd
-import inspect
-from typer.models import ArgumentInfo, OptionInfo
 
 app = typer.Typer()
 
@@ -14,62 +12,6 @@ app.add_typer(export.app, name="export", help="导出指令")
 app.add_typer(config.app, name="config", help="配置指令")
 app.add_typer(db.app, name="db", help="数据库指令")
 app.add_typer(clean.app, name="clean", help="清理指令")
-
-def get_command_options(callback):
-    """从回调函数自动获取可选参数列表"""
-    if not callback:
-        return []
-    
-    sig = inspect.signature(callback)
-    options = []
-    
-    for param_name, param in sig.parameters.items():
-        default = param.default
-        
-        if default is inspect.Parameter.empty:
-            continue
-        
-        if isinstance(default, OptionInfo):
-            if hasattr(default, 'names') and default.names:
-                options.extend(default.names)
-            else:
-                options.append(f'--{param_name.replace("_", "-")}')
-        elif isinstance(default, ArgumentInfo):
-            pass
-        elif isinstance(default, bool) and default is False:
-            options.append(f'--{param_name.replace("_", "-")}')
-        elif default is None or isinstance(default, (str, int, float, bool)):
-            options.append(f'--{param_name.replace("_", "-")}')
-    
-    return options
-
-def build_command_metadata():
-    """自动构建命令元数据，包括子命令和参数"""
-    subcommands_map = {}
-    command_options = {}
-    
-    for group in app.registered_groups:
-        group_name = group.name
-        typer_instance = group.typer_instance
-        
-        if hasattr(typer_instance, 'registered_commands'):
-            subcommands = []
-            subcmd_options = {}
-            
-            for cmd_info in typer_instance.registered_commands:
-                cmd_name = cmd_info.name or cmd_info.callback.__name__
-                subcommands.append(cmd_name)
-                options = get_command_options(cmd_info.callback)
-                subcmd_options[cmd_name] = options
-            
-            subcommands_map[group_name] = subcommands
-            command_options[group_name] = subcmd_options
-    
-    for cmd_info in app.registered_commands:
-        cmd_name = cmd_info.name or cmd_info.callback.__name__
-        command_options[cmd_name] = get_command_options(cmd_info.callback)
-    
-    return subcommands_map, command_options
 
 @app.command()
 def version():
@@ -127,123 +69,13 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         # 没有命令行参数，启动交互式模式
         from prompt_toolkit import PromptSession
-        from prompt_toolkit.completion import Completer, Completion
         from prompt_toolkit.styles import Style
         from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.contrib.typer import TyperCompleter
         import io
         
-        # 自动构建命令元数据
-        subcommands_map, command_options = build_command_metadata()
-        
-        # 定义命令补全
-        commands = list(subcommands_map.keys()) + ['help', 'version', 'exit']
-        
-        class CustomCompleter(Completer):
-            """自定义补全器，根据已输入的命令动态提供补全"""
-            
-            def get_completions(self, document, complete_event):
-                text = document.text_before_cursor
-                words = text.split()
-                
-                # 获取当前正在输入的词（可能不完整）
-                current_word = ''
-                if text and not text.endswith(' '):
-                    current_word = words[-1] if words else ''
-                
-                if len(words) == 0 or (len(words) == 1 and not text.endswith(' ')):
-                    # 没有输入或正在输入第一个词，提示一级命令
-                    search_word = words[0] if words else ''
-                    for cmd in commands:
-                        if cmd.startswith(search_word):
-                            yield Completion(cmd, start_position=-len(search_word))
-                
-                elif len(words) == 1 and text.endswith(' '):
-                    # 输入了一个完整的词，后面有空格
-                    first_word = words[0]
-                    
-                    if first_word == 'help':
-                        # help 后面提示所有一级命令
-                        for cmd in commands:
-                            if cmd not in ('help', 'exit'):
-                                yield Completion(cmd, start_position=0)
-                    elif first_word in subcommands_map:
-                        # 有子命令的一级命令，提示二级命令
-                        for subcmd in subcommands_map[first_word]:
-                            yield Completion(subcmd, start_position=0)
-                    elif first_word in command_options:
-                        # 没有子命令的一级命令，提示参数
-                        options = command_options.get(first_word, [])
-                        for opt in options:
-                            yield Completion(opt, start_position=0)
-                
-                elif len(words) >= 2:
-                    # 输入了两个或更多词
-                    first_word = words[0]
-                    
-                    # 处理 help 命令
-                    if first_word == 'help':
-                        if len(words) == 2 and not text.endswith(' '):
-                            # 正在输入第二个词
-                            for cmd in commands:
-                                if cmd not in ('help', 'exit') and cmd.startswith(words[1]):
-                                    yield Completion(cmd, start_position=-len(words[1]))
-                        return
-                    
-                    # 处理有子命令的一级命令
-                    if first_word in subcommands_map:
-                        second_word = words[1]
-                        current_subcmds = subcommands_map[first_word]
-                        
-                        if len(words) == 2 and not text.endswith(' '):
-                            # 正在输入第二个词（二级命令）
-                            for subcmd in current_subcmds:
-                                if subcmd.startswith(second_word):
-                                    yield Completion(subcmd, start_position=-len(second_word))
-                        
-                        elif (len(words) == 2 and text.endswith(' ')) or (len(words) == 3 and not text.endswith(' ')):
-                            # 二级命令已完整，提示参数
-                            # 或者正在输入参数
-                            if second_word in current_subcmds:
-                                options = self._get_options(first_word, second_word)
-                                if len(words) == 3 and not text.endswith(' '):
-                                    # 正在输入参数，进行前缀匹配
-                                    prefix = words[2]
-                                    for opt in options:
-                                        if opt.startswith(prefix):
-                                            yield Completion(opt, start_position=-len(prefix))
-                                else:
-                                    # 提示所有参数
-                                    for opt in options:
-                                        yield Completion(opt, start_position=0)
-                        
-                        elif len(words) >= 3 and text.endswith(' '):
-                            # 已经输入了参数，继续提示剩余参数
-                            if second_word in current_subcmds:
-                                options = self._get_options(first_word, second_word)
-                                for opt in options:
-                                    yield Completion(opt, start_position=0)
-                    
-                    # 处理没有子命令的一级命令
-                    elif first_word in command_options and first_word not in subcommands_map:
-                        options = command_options.get(first_word, [])
-                        if len(words) >= 2 and not text.endswith(' '):
-                            # 正在输入参数
-                            prefix = words[-1]
-                            for opt in options:
-                                if opt.startswith(prefix):
-                                    yield Completion(opt, start_position=-len(prefix))
-                        elif text.endswith(' '):
-                            # 提示所有参数
-                            for opt in options:
-                                yield Completion(opt, start_position=0)
-            
-            def _get_options(self, primary_cmd, subcmd):
-                """获取命令的参数列表"""
-                if primary_cmd in command_options:
-                    cmd_opts = command_options[primary_cmd]
-                    if isinstance(cmd_opts, dict) and subcmd in cmd_opts:
-                        return cmd_opts[subcmd]
-                return []
+        # 创建 Typer 补全器
+        completer = TyperCompleter(app)
         
         # 定义样式
         style = Style.from_dict({
@@ -255,7 +87,8 @@ if __name__ == "__main__":
         # 交互式命令行界面
         session = PromptSession(
             history=FileHistory('.duplicate_finder_history'),
-            style=style
+            style=style,
+            completer=completer
         )
         
         print("重复文件分析工具")
@@ -311,7 +144,7 @@ if __name__ == "__main__":
         while True:
             try:
                 # 获取用户输入
-                command = session.prompt('> ', completer=CustomCompleter())
+                command = session.prompt('> ')
                 command = command.strip()
                 
                 if not command:
