@@ -150,8 +150,10 @@ class TyperCompleter(Completer):
                         
                         # 使用路径补全器生成补全
                         for completion in path_completer.get_completions(path_document, complete_event):
-                            # 调整 start_position 以匹配原始文档
-                            start_position = completion.start_position - len(command_prefix)
+                            # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
+                            # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
+                            start_position = completion.start_position - len(path_part)
+                            
                             # 创建新的 Completion 对象
                             yield Completion(
                                 text=completion.text,
@@ -183,8 +185,10 @@ class TyperCompleter(Completer):
                 
                 # 使用路径补全器生成补全
                 for completion in path_completer.get_completions(path_document, complete_event):
-                    # 调整 start_position 以匹配原始文档
-                    start_position = completion.start_position - len(command_prefix)
+                    # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
+                    # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
+                    start_position = completion.start_position - len(path_part)
+                    
                     # 创建新的 Completion 对象
                     yield Completion(
                         text=completion.text,
