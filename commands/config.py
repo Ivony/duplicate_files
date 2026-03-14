@@ -1,3 +1,4 @@
+import typer
 import re
 import json
 import os
@@ -215,54 +216,42 @@ class ConfigManager:
                 print(f"无效的正则表达式: {pattern}")
         return False
 
-if __name__ == '__main__':
-    import sys
-    
-    manager = ConfigManager()
-    
-    if len(sys.argv) < 2:
-        print("用法: python config_manager.py <command> [args]")
-        print("\n可用命令:")
-        print("  limit <path>         - 设置检索范围限制")
-        print("  limit clear           - 解除检索范围限制")
-        print("  exclude add <pattern>  - 添加路径排除模式")
-        print("  exclude list          - 查看当前排除模式")
-        print("  exclude remove <pattern> - 移除路径排除模式")
-        sys.exit(1)
-    
-    command = sys.argv[1]
-    
-    if command == 'limit':
-        if len(sys.argv) < 3:
-            print("错误: 请指定路径或使用clear清除限制")
-            sys.exit(1)
-        
-        if sys.argv[2] == 'clear':
-            manager.clear_limit()
+app = typer.Typer()
+config_manager = ConfigManager()
+
+@app.command()
+def limit(
+    path: str = typer.Argument(None, help="设置检索范围限制，使用 clear 清除限制")
+):
+    """设置检索范围限制"""
+    if path == "clear":
+        config_manager.clear_limit()
+        typer.echo("已解除检索范围限制")
+    elif path:
+        if config_manager.set_limit(path):
+            typer.echo(f"已设置检索范围限制: {path}")
         else:
-            manager.set_limit(sys.argv[2])
-    elif command == 'exclude':
-        if len(sys.argv) < 3:
-            print("错误: 请指定子命令（add/list/remove）")
-            sys.exit(1)
-        
-        subcommand = sys.argv[2]
-        
-        if subcommand == 'add':
-            if len(sys.argv) < 4:
-                print("错误: 请指定排除模式")
-                sys.exit(1)
-            manager.add_exclude_pattern(sys.argv[3])
-        elif subcommand == 'list':
-            manager.list_exclude_patterns()
-        elif subcommand == 'remove':
-            if len(sys.argv) < 4:
-                print("错误: 请指定排除模式")
-                sys.exit(1)
-            manager.remove_exclude_pattern(sys.argv[3])
-        else:
-            print(f"未知的子命令: {subcommand}")
-            sys.exit(1)
+            typer.echo(f"设置检索范围限制失败: {path}")
     else:
-        print(f"未知命令: {command}")
-        sys.exit(1)
+        typer.echo("错误: 请指定路径或使用 clear 清除限制")
+
+@app.command()
+def exclude(
+    action: str = typer.Argument(..., help="操作: add, list, remove"),
+    pattern: str = typer.Argument(None, help="排除模式")
+):
+    """路径排除模式管理"""
+    if action == "add":
+        if pattern:
+            config_manager.add_exclude_pattern(pattern)
+        else:
+            typer.echo("错误: 请指定排除模式")
+    elif action == "list":
+        config_manager.list_exclude_patterns()
+    elif action == "remove":
+        if pattern:
+            config_manager.remove_exclude_pattern(pattern)
+        else:
+            typer.echo("错误: 请指定排除模式")
+    else:
+        typer.echo(f"错误: 未知的操作: {action}")

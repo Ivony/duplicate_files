@@ -1,5 +1,6 @@
-import sqlite3
+import typer
 import os
+import sqlite3
 from datetime import datetime
 
 class DatabaseManager:
@@ -335,67 +336,55 @@ class DatabaseManager:
         if len(files) >= 100:
             print(f"\n... 还有更多文件（仅显示前100个）")
 
-if __name__ == '__main__':
-    import sys
+app = typer.Typer()
 
-    manager = DatabaseManager()
+@app.command()
+def check():
+    """检查数据库结构和数据"""
+    db_manager = DatabaseManager('file_index.db')
+    db_manager.check_database()
 
-    if len(sys.argv) < 2:
-        print("用法: python database_manager.py <command> [args]")
-        print("\n可用命令:")
-        print("  init [--force]       - 初始化数据库结构（--force 强制重建，不询问）")
-        print("  check                - 检查数据库结构和数据")
-        print("  optimize             - 优化数据库性能")
-        print("  backup <path> [--hash-only]  - 备份数据库")
-        print("                         默认: 备份整个数据库(.db)")
-        print("                         --hash-only: 只备份file_hash表(.csv)")
-        print("  restore <path> [--hash-only] [--merge]  - 恢复数据库")
-        print("                         默认: 恢复整个数据库")
-        print("                         --hash-only: 只恢复file_hash表")
-        print("                         --merge: 合并模式（保留现有数据）")
-        print("  status               - 查看索引状态")
-        print("  list <path>          - 列举指定路径的索引文件")
-        sys.exit(1)
+@app.command()
+def optimize():
+    """优化数据库性能"""
+    db_manager = DatabaseManager('file_index.db')
+    db_manager.optimize_database()
 
-    command = sys.argv[1]
-
-    if command == 'init':
-        force = '--force' in sys.argv
-        manager.init_database(force)
-    elif command == 'check':
-        manager.check_database()
-    elif command == 'optimize':
-        manager.optimize_database()
-    elif command == 'backup':
-        if len(sys.argv) < 3:
-            print("错误: 请指定备份路径")
-            sys.exit(1)
-        backup_path = sys.argv[2]
-        hash_only = '--hash-only' in sys.argv
-        if hash_only:
-            if not backup_path.endswith('.csv'):
-                backup_path += '.csv'
-            manager.backup_file_hash(backup_path)
-        else:
-            manager.backup_database(backup_path)
-    elif command == 'restore':
-        if len(sys.argv) < 3:
-            print("错误: 请指定备份文件路径")
-            sys.exit(1)
-        backup_path = sys.argv[2]
-        hash_only = '--hash-only' in sys.argv
-        if hash_only:
-            merge = '--merge' in sys.argv
-            manager.restore_file_hash(backup_path, merge=merge)
-        else:
-            manager.restore_database(backup_path)
-    elif command == 'status':
-        manager.get_index_status()
-    elif command == 'list':
-        if len(sys.argv) < 3:
-            print("错误: 请指定路径")
-            sys.exit(1)
-        manager.list_indexed_files(sys.argv[2])
+@app.command()
+def backup(
+    backup_path: str,
+    hash_only: bool = False
+):
+    """备份数据库，--hash-only 只备份file_hash表"""
+    backup_path = os.path.abspath(backup_path)
+    db_manager = DatabaseManager('file_index.db')
+    
+    if hash_only:
+        if not backup_path.endswith('.csv'):
+            backup_path += '.csv'
+        db_manager.backup_file_hash(backup_path)
     else:
-        print(f"未知命令: {command}")
-        sys.exit(1)
+        db_manager.backup_database(backup_path)
+
+@app.command()
+def restore(
+    backup_path: str,
+    hash_only: bool = False,
+    merge: bool = False
+):
+    """恢复数据库，--hash-only 只恢复file_hash表，--merge 合并模式"""
+    backup_path = os.path.abspath(backup_path)
+    db_manager = DatabaseManager('file_index.db')
+    
+    if hash_only:
+        db_manager.restore_file_hash(backup_path, merge=merge)
+    else:
+        db_manager.restore_database(backup_path)
+
+@app.command()
+def init(
+    force: bool = False
+):
+    """重建数据库结构，--force 强制重建，不询问"""
+    db_manager = DatabaseManager('file_index.db')
+    db_manager.init_database(force)

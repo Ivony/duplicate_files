@@ -1,3 +1,5 @@
+import typer
+import os
 import sqlite3
 import csv
 import json
@@ -245,33 +247,31 @@ class ExportManager:
         except Exception as e:
             print(f"报告生成失败: {e}")
 
-if __name__ == '__main__':
-    import sys
-    
-    exporter = ExportManager()
-    
-    if len(sys.argv) < 2:
-        print("用法: python export_manager.py <command> <path>")
-        print("\n可用命令:")
-        print("  csv <path>     - 导出为CSV格式")
-        print("  json <path>    - 导出为JSON格式")
-        print("  report <path>   - 生成详细的重复文件报告")
-        sys.exit(1)
-    
-    command = sys.argv[1]
-    
-    if len(sys.argv) < 3:
-        print("错误: 请指定输出路径")
-        sys.exit(1)
-    
-    output_path = sys.argv[2]
-    
-    if command == 'csv':
-        exporter.export_csv(output_path)
-    elif command == 'json':
-        exporter.export_json(output_path)
-    elif command == 'report':
-        exporter.generate_report(output_path)
-    else:
-        print(f"未知命令: {command}")
-        sys.exit(1)
+app = typer.Typer()
+
+@app.command()
+def csv(
+    output_path: str
+):
+    """导出分析结果为CSV格式"""
+    output_path = os.path.abspath(output_path)
+    exporter = ExportManager('file_index.db')
+    exporter.export_csv(output_path)
+
+@app.command()
+def json(
+    output_path: str
+):
+    """导出分析结果为JSON格式"""
+    output_path = os.path.abspath(output_path)
+    exporter = ExportManager('file_index.db')
+    exporter.export_json(output_path)
+
+@app.command()
+def report(
+    output_path: str
+):
+    """生成详细的重复文件报告"""
+    output_path = os.path.abspath(output_path)
+    exporter = ExportManager('file_index.db')
+    exporter.generate_report(output_path)
