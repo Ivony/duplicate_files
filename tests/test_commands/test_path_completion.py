@@ -102,3 +102,21 @@ class TestPathCompletion:
         # 由于路径补全依赖于实际文件系统，这里只验证返回类型
         for completion in completions:
             assert isinstance(completion, Completion)
+    
+    def test_index_scan_path_completion(self):
+        """测试index scan命令的路径补全"""
+        # 测试index scan命令的路径补全
+        document = Document('index scan ', 11)
+        completions = list(self.completer.get_completions(document, None))
+        
+        # 验证返回的是 Completion 对象
+        for completion in completions:
+            assert isinstance(completion, Completion)
+        
+        # 测试带部分路径的补全
+        document = Document('index scan C:', 13)
+        completions = list(self.completer.get_completions(document, None))
+        
+        # 验证返回的是 Completion 对象
+        for completion in completions:
+            assert isinstance(completion, Completion)

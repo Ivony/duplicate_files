@@ -140,8 +140,27 @@ class TyperCompleter(Completer):
                     # 提取路径补全器
                     path_completer = self.path_completion_commands.get(('clean', 'script'))
                     if path_completer:
-                        for completion in path_completer.get_completions(document, complete_event):
-                            yield completion
+                        # 提取路径部分
+                        command_prefix = f"{root_cmd} {sub_cmd} --output "
+                        path_part = text[len(command_prefix):] if text.startswith(command_prefix) else text
+                        
+                        # 创建只包含路径部分的临时文档
+                        from prompt_toolkit.document import Document
+                        path_document = Document(path_part, len(path_part))
+                        
+                        # 使用路径补全器生成补全
+                        for completion in path_completer.get_completions(path_document, complete_event):
+                            # 调整 start_position 以匹配原始文档
+                            start_position = completion.start_position - len(command_prefix)
+                            # 创建新的 Completion 对象
+                            yield Completion(
+                                text=completion.text,
+                                start_position=start_position,
+                                display=completion.display,
+                                display_meta=completion.display_meta,
+                                style=completion.style,
+                                selected_style=completion.selected_style
+                            )
                         return
         
         # 检查是否需要路径补全（普通命令）
@@ -153,9 +172,28 @@ class TyperCompleter(Completer):
             if (root_cmd, sub_cmd) in self.path_completion_commands:
                 # 提取路径补全器
                 path_completer = self.path_completion_commands[(root_cmd, sub_cmd)]
+                
+                # 提取路径部分
+                command_prefix = f"{root_cmd} {sub_cmd} "
+                path_part = text[len(command_prefix):] if text.startswith(command_prefix) else text
+                
+                # 创建只包含路径部分的临时文档
+                from prompt_toolkit.document import Document
+                path_document = Document(path_part, len(path_part))
+                
                 # 使用路径补全器生成补全
-                for completion in path_completer.get_completions(document, complete_event):
-                    yield completion
+                for completion in path_completer.get_completions(path_document, complete_event):
+                    # 调整 start_position 以匹配原始文档
+                    start_position = completion.start_position - len(command_prefix)
+                    # 创建新的 Completion 对象
+                    yield Completion(
+                        text=completion.text,
+                        start_position=start_position,
+                        display=completion.display,
+                        display_meta=completion.display_meta,
+                        style=completion.style,
+                        selected_style=completion.selected_style
+                    )
                 return
         
         # 检查是否以空格结尾（表示正在输入子命令）
