@@ -120,3 +120,18 @@ class TestPathCompletion:
         # 验证返回的是 Completion 对象
         for completion in completions:
             assert isinstance(completion, Completion)
+    
+    def test_path_completion_preserves_prefix(self):
+        """测试路径补全保留路径前缀"""
+        # 测试当输入部分路径时，补全应该保留路径前缀
+        # 例如：输入 'index scan C:\T'，选择 'Temp' 应该变成 'index scan C:\Temp'
+        document = Document('index scan C:/T', 14)
+        completions = list(self.completer.get_completions(document, None))
+        
+        # 验证返回的是 Completion 对象
+        for completion in completions:
+            assert isinstance(completion, Completion)
+            # 确保 start_position 是负数（表示从光标位置向左偏移）
+            assert completion.start_position <= 0
+            # 确保 start_position 正确计算，只替换路径部分
+            assert completion.start_position == -3  # 替换 'C:/T' 部分

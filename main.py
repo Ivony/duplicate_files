@@ -153,7 +153,8 @@ class TyperCompleter(Completer):
                             # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
                             # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
                             # 我们只希望替换路径部分，而不是整个命令
-                            start_position = -(len(text) - len(command_prefix))
+                            # 当用户输入部分路径时，应该从路径部分的开始位置替换
+                            start_position = -len(path_part)
                             
                             # 创建新的 Completion 对象
                             yield Completion(
@@ -189,7 +190,8 @@ class TyperCompleter(Completer):
                     # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
                     # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
                     # 我们只希望替换路径部分，而不是整个命令
-                    start_position = -(len(text) - len(command_prefix))
+                    # 当用户输入部分路径时，应该从路径部分的开始位置替换
+                    start_position = -len(path_part)
                     
                     # 创建新的 Completion 对象
                     yield Completion(
