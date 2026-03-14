@@ -24,9 +24,6 @@ class DataViewer:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # 构建基础查询条件
-        hash_condition = "WHERE dg.Hash IS NOT NULL AND dg.Hash != ''" if hash_only else ""
-        
         # 获取files表中的文件数量
         cursor.execute('SELECT COUNT(*) FROM files')
         total_files = cursor.fetchone()[0]
@@ -69,14 +66,41 @@ class DataViewer:
         cursor.execute('SELECT SUM(Size) FROM files')
         total_size = cursor.fetchone()[0] or 0
         
-        # 计算重复文件总大小
+        # 计算重复文件总大小（默认按已计算哈希的组）
+        cursor.execute('''
+        SELECT SUM(duplicate_size)
+        FROM (
+            SELECT (COUNT(*) - 1) * MIN(f.Size) as duplicate_size
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+            WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+            GROUP BY df.Group_ID
+        )
+        ''')
+        duplicate_size = cursor.fetchone()[0] or 0
+        
+        # 计算已计算哈希的文件总大小
+        cursor.execute('''
+        SELECT SUM(f.Size) FROM file_hash fh
+        INNER JOIN files f ON fh.Filepath = f.Filename
+        WHERE fh.Hash IS NOT NULL AND fh.Hash != ''
+        ''')
+        hashed_size = cursor.fetchone()[0] or 0
+        
+        # 计算duplicate_files中所有文件的总大小（用于计算哈希进度）
+        cursor.execute('''
+        SELECT SUM(f.Size) FROM duplicate_files df
+        INNER JOIN files f ON df.Filepath = f.Filename
+        ''')
+        duplicate_files_total_size = cursor.fetchone()[0] or 0
+        
+        # 计算平均重复度（每个重复组平均有多少个文件）
         if hash_only:
             cursor.execute('''
-            SELECT SUM(duplicate_size)
-            FROM (
-                SELECT (COUNT(*) - 1) * MIN(f.Size) as duplicate_size
+            SELECT AVG(file_count) FROM (
+                SELECT COUNT(*) as file_count
                 FROM duplicate_files df
-                INNER JOIN files f ON df.Filepath = f.Filename
                 INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
                 WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
                 GROUP BY df.Group_ID
@@ -84,16 +108,109 @@ class DataViewer:
             ''')
         else:
             cursor.execute('''
-            SELECT SUM(duplicate_size)
-            FROM (
-                SELECT (COUNT(*) - 1) * MIN(f.Size) as duplicate_size
+            SELECT AVG(file_count) FROM (
+                SELECT COUNT(*) as file_count
                 FROM duplicate_files df
-                INNER JOIN files f ON df.Filepath = f.Filename
-                INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
                 GROUP BY df.Group_ID
             )
             ''')
-        duplicate_size = cursor.fetchone()[0] or 0
+        avg_duplication = cursor.fetchone()[0] or 0
+        
+        # 计算平均重复组大小
+        if hash_only:
+            cursor.execute('''
+            SELECT AVG(dg.Size) FROM duplicate_groups dg
+            WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+            ''')
+        else:
+            cursor.execute('SELECT AVG(Size) FROM duplicate_groups')
+        avg_group_size = cursor.fetchone()[0] or 0
+        
+        # 磁盘分布统计
+        cursor.execute('''
+        SELECT 
+            UPPER(SUBSTR(f.Filename, 1, 2)) as disk,
+            COUNT(DISTINCT df.Group_ID) as group_count,
+            COUNT(*) as file_count
+        FROM duplicate_files df
+        INNER JOIN files f ON df.Filepath = f.Filename
+        INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+        WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        GROUP BY disk
+        ORDER BY group_count DESC
+        ''')
+        disk_distribution = {}
+        for disk, group_count, file_count in cursor.fetchall():
+            disk_distribution[disk] = {'group_count': group_count, 'file_count': file_count}
+        
+        # 跨磁盘重复统计（一个组中的文件分布在多个磁盘上）
+        cursor.execute('''
+        SELECT COUNT(*) FROM (
+            SELECT df.Group_ID
+            FROM duplicate_files df
+            INNER JOIN duplicate_groups dg ON df.Group_ID = dg.ID
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+            GROUP BY df.Group_ID
+            HAVING COUNT(DISTINCT UPPER(SUBSTR(f.Filename, 1, 2))) > 1
+        )
+        ''')
+        cross_disk_groups = cursor.fetchone()[0]
+        
+        # 文件类型 Top 10（按可释放空间排序）
+        cursor.execute('''
+        SELECT 
+            dg.Extension,
+            COUNT(*) as group_count,
+            SUM((cnt - 1) * dg.Size) as savable_space
+        FROM duplicate_groups dg
+        INNER JOIN (
+            SELECT Group_ID, COUNT(*) as cnt
+            FROM duplicate_files
+            GROUP BY Group_ID
+        ) df ON dg.ID = df.Group_ID
+        WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        GROUP BY dg.Extension
+        ORDER BY savable_space DESC
+        LIMIT 10
+        ''')
+        top_extensions = []
+        for ext, group_count, savable in cursor.fetchall():
+            top_extensions.append({
+                'extension': ext or '(无扩展名)',
+                'group_count': group_count,
+                'savable_space': savable
+            })
+        
+        # 大小分布统计
+        cursor.execute('''
+        SELECT 
+            CASE
+                WHEN Size < 1048576 THEN '< 1MB'
+                WHEN Size < 10485760 THEN '1MB - 10MB'
+                WHEN Size < 104857600 THEN '10MB - 100MB'
+                WHEN Size < 1073741824 THEN '100MB - 1GB'
+                ELSE '> 1GB'
+            END as size_range,
+            COUNT(*) as group_count,
+            SUM((cnt - 1) * dg.Size) as savable_space
+        FROM duplicate_groups dg
+        INNER JOIN (
+            SELECT Group_ID, COUNT(*) as cnt
+            FROM duplicate_files
+            GROUP BY Group_ID
+        ) df ON dg.ID = df.Group_ID
+        WHERE dg.Hash IS NOT NULL AND dg.Hash != ''
+        GROUP BY size_range
+        ORDER BY MIN(dg.Size)
+        ''')
+        size_distribution = {}
+        for range_name, group_count, savable in cursor.fetchall():
+            size_distribution[range_name] = {'group_count': group_count, 'savable_space': savable}
+        
+        # 数据库大小
+        import os
+        db_size = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
         
         conn.close()
         
@@ -106,7 +223,16 @@ class DataViewer:
             'hashed_groups': hashed_groups,
             'unhashed_groups': unhashed_groups,
             'total_size': total_size,
-            'duplicate_size': duplicate_size
+            'duplicate_size': duplicate_size,
+            'hashed_size': hashed_size,
+            'duplicate_files_total_size': duplicate_files_total_size,
+            'avg_duplication': avg_duplication,
+            'avg_group_size': avg_group_size,
+            'disk_distribution': disk_distribution,
+            'cross_disk_groups': cross_disk_groups,
+            'top_extensions': top_extensions,
+            'size_distribution': size_distribution,
+            'db_size': db_size
         }
     
     def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size'):
@@ -740,6 +866,16 @@ def stats(
     by_date: bool = False
 ):
     """显示统计分析"""
+    def format_size(size):
+        if size >= 1073741824:
+            return f"{size/1073741824:.2f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.2f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.2f} KB"
+        else:
+            return f"{size} B"
+    
     if by_extension:
         stats = analyzer.get_stats_by_extension()
         typer.echo("\n按扩展名统计")
@@ -762,23 +898,68 @@ def stats(
             typer.echo(f"  {date}: {count} 个组")
         typer.echo("=" * 60)
     else:
-        # 默认显示数据汇总报告
-        stats = analyzer.get_statistics(hash_only=False)
+        stats = analyzer.get_statistics(hash_only=True)
         
         typer.echo("\n数据汇总报告")
         typer.echo("=" * 60)
-        typer.echo(f"总文件数: {stats['total_files']:,}")
-        typer.echo(f"重复文件组数: {stats['duplicate_groups']:,}")
-        typer.echo(f"  - 已计算哈希的组: {stats['hashed_groups']:,}")
-        typer.echo(f"  - 未计算哈希的组: {stats['unhashed_groups']:,}")
-        typer.echo(f"重复文件关联数: {stats['duplicate_files']:,}")
-        typer.echo(f"已计算哈希的文件数: {stats['hashed_files']:,}")
-        typer.echo(f"待计算哈希的文件数: {stats['unhashed_files']:,}")
-        typer.echo(f"总文件大小: {stats['total_size']:,} 字节 ({stats['total_size']/1024/1024/1024:.2f} GB)")
-        typer.echo(f"重复文件总大小: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
-        typer.echo("\n如果删除重复文件:")
-        typer.echo(f"  可以删除 {stats['duplicate_files'] - stats['duplicate_groups']} 个文件")
-        typer.echo(f"  可以节省磁盘空间: {stats['duplicate_size']:,} 字节 ({stats['duplicate_size']/1024/1024/1024:.2f} GB)")
+        
+        typer.echo("\n【基本信息】")
+        typer.echo(f"  总文件数: {stats['total_files']:,}")
+        typer.echo(f"  总文件大小: {format_size(stats['total_size'])}")
+        
+        typer.echo("\n【重复文件统计】（仅统计已确认哈希的组）")
+        typer.echo(f"  重复文件组数: {stats['hashed_groups']:,}")
+        typer.echo(f"  重复文件数: {stats['duplicate_files']:,}")
+        typer.echo(f"  平均重复度: {stats['avg_duplication']:.2f} 个/组")
+        typer.echo(f"  平均组大小: {format_size(stats['avg_group_size'])}")
+        
+        duplicate_rate = (stats['duplicate_files'] / stats['total_files'] * 100) if stats['total_files'] > 0 else 0
+        typer.echo(f"  重复率: {duplicate_rate:.2f}%")
+        
+        typer.echo("\n【可释放空间】")
+        deletable_files = stats['duplicate_files'] - stats['hashed_groups']
+        typer.echo(f"  可删除文件数: {deletable_files:,}")
+        typer.echo(f"  可节省空间: {format_size(stats['duplicate_size'])}")
+        
+        typer.echo("\n【哈希计算进度】")
+        if stats['duplicate_files_total_size'] > 0:
+            hash_progress = stats['hashed_size'] / stats['duplicate_files_total_size'] * 100
+        else:
+            hash_progress = 0
+        typer.echo(f"  已计算大小: {format_size(stats['hashed_size'])} / {format_size(stats['duplicate_files_total_size'])}")
+        typer.echo(f"  计算进度: {hash_progress:.2f}%")
+        typer.echo(f"  已计算文件数: {stats['hashed_files']:,}")
+        typer.echo(f"  待计算文件数: {stats['unhashed_files']:,}")
+        
+        typer.echo("\n【磁盘分布】")
+        if stats['disk_distribution']:
+            for disk, info in stats['disk_distribution'].items():
+                typer.echo(f"  {disk}: {info['group_count']} 个组, {info['file_count']} 个文件")
+            typer.echo(f"  跨磁盘重复组: {stats['cross_disk_groups']} 个")
+        else:
+            typer.echo("  暂无数据")
+        
+        typer.echo("\n【文件类型 Top 10】（按可释放空间排序）")
+        if stats['top_extensions']:
+            for i, ext_info in enumerate(stats['top_extensions'], 1):
+                typer.echo(f"  {i}. {ext_info['extension']}: {ext_info['group_count']} 个组, 可释放 {format_size(ext_info['savable_space'])}")
+        else:
+            typer.echo("  暂无数据")
+        
+        typer.echo("\n【大小分布】")
+        if stats['size_distribution']:
+            size_order = ['< 1MB', '1MB - 10MB', '10MB - 100MB', '100MB - 1GB', '> 1GB']
+            for range_name in size_order:
+                if range_name in stats['size_distribution']:
+                    info = stats['size_distribution'][range_name]
+                    typer.echo(f"  {range_name}: {info['group_count']} 个组, 可释放 {format_size(info['savable_space'])}")
+        else:
+            typer.echo("  暂无数据")
+        
+        typer.echo("\n【其他信息】")
+        typer.echo(f"  数据库大小: {format_size(stats['db_size'])}")
+        typer.echo(f"  未确认哈希的组: {stats['unhashed_groups']:,}")
+        
         typer.echo("=" * 60)
 
 # 辅助函数
