@@ -142,6 +142,17 @@ python tests/test_autocomplete/debug/debug_path_fix.py
 - `test_path_completion_with_backslash` - 测试带反斜杠的路径补全
 - `test_option_vs_path_distinction` - 测试选项和路径的区分
 
+### 问题：路径补全触发时机过早
+**描述**：当输入 `E:` 时，就会显示 E:\ 下面的所有文件夹作为候选列表，选择时会覆盖掉 `E:` 字符，导致路径错误。
+
+**原因**：PathCompleter 在输入驱动器字母（如 `E:`）时就触发补全，但此时用户可能还在输入。
+
+**解决方案**：添加检查，只有当路径部分包含路径分隔符（`\` 或 `/`）时才触发补全。用户需要输入 `E:\` 才会触发补全。
+
+**相关测试**：
+- `test_path_completion_requires_separator` - 测试路径补全需要路径分隔符
+- `test_path_completion_with_partial_input` - 测试不带分隔符时不触发补全
+
 ## 测试数据
 
 ### 根命令列表

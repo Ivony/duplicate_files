@@ -83,14 +83,37 @@ class TestPathCompletion:
             assert isinstance(completion, Completion)
     
     def test_path_completion_with_partial_input(self):
-        """测试带部分输入的路径补全"""
-        # 测试带部分输入的路径补全
+        """测试带部分输入的路径补全
+        
+        当输入 'index scan C:' 时，不应该触发补全，
+        因为路径部分不包含路径分隔符。
+        应该等待用户输入 'C:\\' 才触发补全。
+        """
         document = Document('index scan C:', 13)
         completions = list(self.completer.get_completions(document, None))
         
-        # 验证返回的是 Completion 对象
-        for completion in completions:
+        assert len(completions) == 0
+    
+    def test_path_completion_requires_separator(self):
+        """测试路径补全需要路径分隔符
+        
+        验证只有当路径部分包含路径分隔符时才触发补全：
+        - 'index scan E:' - 不触发补全
+        - 'index scan E:\\' - 触发补全
+        """
+        # 测试不带分隔符的驱动器字母
+        document1 = Document('index scan E:', 13)
+        completions1 = list(self.completer.get_completions(document1, None))
+        assert len(completions1) == 0
+        
+        # 测试带分隔符的驱动器字母
+        document2 = Document('index scan E:\\', 14)
+        completions2 = list(self.completer.get_completions(document2, None))
+        # 应该返回补全结果
+        assert len(completions2) > 0
+        for completion in completions2:
             assert isinstance(completion, Completion)
+            assert completion.text.startswith('E:\\') or completion.text.startswith('E:/')
     
     def test_path_completion_priority(self):
         """测试路径补全优先级"""
@@ -105,8 +128,8 @@ class TestPathCompletion:
     
     def test_index_scan_path_completion(self):
         """测试index scan命令的路径补全"""
-        # 测试index scan命令的路径补全
-        document = Document('index scan ', 11)
+        # 测试index scan命令的路径补全（需要路径分隔符）
+        document = Document('index scan C:\\', 14)
         completions = list(self.completer.get_completions(document, None))
         
         # 验证返回的是 Completion 对象
@@ -114,7 +137,7 @@ class TestPathCompletion:
             assert isinstance(completion, Completion)
         
         # 测试带部分路径的补全
-        document = Document('index scan C:', 13)
+        document = Document('index scan C:\\T', 15)
         completions = list(self.completer.get_completions(document, None))
         
         # 验证返回的是 Completion 对象
@@ -199,14 +222,14 @@ class TestPathCompletion:
             assert isinstance(completion, Completion)
     
     def test_path_completion_handles_empty_path(self):
-        """测试路径补全处理空路径"""
-        # 测试空路径
+        """测试路径补全处理空路径
+        
+        空路径不应该触发补全，需要至少包含路径分隔符。
+        """
         document = Document('index scan ', 11)
         completions = list(self.completer.get_completions(document, None))
         
-        # 验证返回的是 Completion 对象
-        for completion in completions:
-            assert isinstance(completion, Completion)
+        assert len(completions) == 0
     
     def test_path_completion_handles_special_characters(self):
         """测试路径补全处理特殊字符"""

@@ -136,6 +136,10 @@ class TyperCompleter(Completer):
                 command_prefix = f"{root_cmd} {sub_cmd} {third_word} "
                 path_part = text[len(command_prefix):] if text.startswith(command_prefix) else text
                 
+                # 只有当路径部分包含路径分隔符（\ 或 /）时才触发补全
+                if '\\' not in path_part and '/' not in path_part:
+                    return
+                
                 # 创建只包含路径部分的临时文档
                 from prompt_toolkit.document import Document
                 path_document = Document(path_part, len(path_part))
@@ -216,6 +220,11 @@ class TyperCompleter(Completer):
                 # 提取路径部分
                 command_prefix = f"{root_cmd} {sub_cmd} "
                 path_part = text[len(command_prefix):] if text.startswith(command_prefix) else text
+                
+                # 只有当路径部分包含路径分隔符（\ 或 /）时才触发补全
+                # 这样可以避免在输入 "E:" 时就触发补全，而是等待输入 "E:\" 才触发
+                if '\\' not in path_part and '/' not in path_part:
+                    return
                 
                 # 创建只包含路径部分的临时文档
                 from prompt_toolkit.document import Document
