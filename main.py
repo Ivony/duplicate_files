@@ -152,7 +152,8 @@ class TyperCompleter(Completer):
                         for completion in path_completer.get_completions(path_document, complete_event):
                             # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
                             # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
-                            start_position = completion.start_position - len(path_part)
+                            # 我们只希望替换路径部分，而不是整个命令
+                            start_position = -(len(text) - len(command_prefix))
                             
                             # 创建新的 Completion 对象
                             yield Completion(
@@ -187,7 +188,8 @@ class TyperCompleter(Completer):
                 for completion in path_completer.get_completions(path_document, complete_event):
                     # 计算正确的 start_position：从当前光标位置向左偏移到路径部分的开始
                     # 注意：start_position 是负数，表示从当前光标位置向左的偏移量
-                    start_position = completion.start_position - len(path_part)
+                    # 我们只希望替换路径部分，而不是整个命令
+                    start_position = -(len(text) - len(command_prefix))
                     
                     # 创建新的 Completion 对象
                     yield Completion(
