@@ -64,7 +64,7 @@ def help(command: Optional[str] = None):
         typer.echo("使用 'help <命令>' 查看特定命令的详细帮助")
         typer.echo("=" * 60)
 
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, PathCompleter
 
 
 class TyperCompleter(Completer):
@@ -75,6 +75,27 @@ class TyperCompleter(Completer):
         # 从Typer应用提取命令结构
         self.root_commands = {}  # 根命令 -> 子命令列表
         self.standalone_commands = []  # 独立命令（如version, help）
+        
+        # 定义需要路径补全的命令
+        self.path_completion_commands = {
+            # 必须是现有文件
+            ('index', 'import'): PathCompleter(file_filter=lambda path: path.endswith('.csv')),
+            ('hash', 'restore'): PathCompleter(),
+            
+            # 必须是现有文件或文件夹
+            ('index', 'scan'): PathCompleter(only_directories=True),
+            ('config', 'limit'): PathCompleter(only_directories=True),
+            ('show', 'files'): PathCompleter(),
+            
+            # 有效的文件路径不一定要存在
+            ('export', 'csv'): PathCompleter(),
+            ('export', 'json'): PathCompleter(),
+            ('export', 'report'): PathCompleter(),
+            ('hash', 'backup'): PathCompleter(),
+            ('clean', 'script'): PathCompleter(),
+            ('db', 'backup_database'): PathCompleter(),
+            ('db', 'backup_file_hash'): PathCompleter(),
+        }
         
         # 提取所有命令结构
         self._extract_commands()
@@ -106,6 +127,36 @@ class TyperCompleter(Completer):
         text = document.text_before_cursor
         stripped_text = text.strip()
         words = stripped_text.split()
+        
+        # 检查是否需要路径补全（带选项的命令）
+        if len(words) >= 3:
+            root_cmd = words[0]
+            sub_cmd = words[1]
+            
+            # 检查是否是带输出选项的命令
+            if (root_cmd, sub_cmd) == ('clean', 'script') and '--output' in words:
+                output_index = words.index('--output')
+                if len(words) > output_index + 1:
+                    # 提取路径补全器
+                    path_completer = self.path_completion_commands.get(('clean', 'script'))
+                    if path_completer:
+                        for completion in path_completer.get_completions(document, complete_event):
+                            yield completion
+                        return
+        
+        # 检查是否需要路径补全（普通命令）
+        if len(words) >= 2:
+            root_cmd = words[0]
+            sub_cmd = words[1]
+            
+            # 检查是否是需要路径补全的命令
+            if (root_cmd, sub_cmd) in self.path_completion_commands:
+                # 提取路径补全器
+                path_completer = self.path_completion_commands[(root_cmd, sub_cmd)]
+                # 使用路径补全器生成补全
+                for completion in path_completer.get_completions(document, complete_event):
+                    yield completion
+                return
         
         # 检查是否以空格结尾（表示正在输入子命令）
         ends_with_space = text.endswith(' ') or text.endswith('\t')
