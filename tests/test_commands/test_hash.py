@@ -167,3 +167,46 @@ class TestHashCalculator:
         # 确保有进度显示和完成提示
         assert len(progress_lines) > 0
         assert len(completed_lines) > 0
+    
+    def test_truncate_filename(self):
+        """测试文件名截断功能"""
+        calc = HashCalculator()
+        
+        # 测试正常长度的文件名
+        normal_name = "test_file.txt"
+        assert calc.truncate_filename(normal_name) == normal_name
+        
+        # 测试刚好达到最大长度的文件名
+        exactly_length = "a" * 37 + ".txt"
+        assert len(calc.truncate_filename(exactly_length)) == 40
+        
+        # 测试需要截断的文件名（保留扩展名）
+        long_name = "a" * 50 + ".mp4"
+        truncated = calc.truncate_filename(long_name)
+        assert len(truncated) <= 40
+        assert truncated.endswith(".mp4")
+        assert "..." in truncated
+        
+        # 测试长扩展名的情况
+        long_ext = "file." + "x" * 35  # 总长度 5 + 35 = 40，刚好达到
+        truncated_ext = calc.truncate_filename(long_ext)
+        assert len(truncated_ext) == 40
+        
+        # 测试超长扩展名的情况
+        very_long_ext = "file." + "x" * 40  # 总长度 5 + 40 = 45，超过最大长度
+        truncated_very_long = calc.truncate_filename(very_long_ext)
+        assert len(truncated_very_long) <= 40
+        assert "..." in truncated_very_long
+        
+        # 测试没有扩展名的情况
+        no_ext = "a" * 50
+        truncated_no_ext = calc.truncate_filename(no_ext)
+        assert len(truncated_no_ext) <= 40
+        assert "..." in truncated_no_ext
+        
+        # 测试带路径的文件名
+        path_name = "C:/very/long/path/to/file/" + "a" * 40 + ".doc"
+        truncated_path = calc.truncate_filename(path_name)
+        assert len(truncated_path) <= 40
+        assert truncated_path.endswith(".doc")
+        assert "..." in truncated_path

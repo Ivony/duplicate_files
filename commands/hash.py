@@ -79,6 +79,42 @@ class HashCalculator:
         else:
             return f"{size} B"
     
+    def truncate_filename(self, filename, max_length=40):
+        """截断文件名，保留扩展名
+        
+        Args:
+            filename: 文件名或路径
+            max_length: 最大长度
+            
+        Returns:
+            截断后的文件名
+        """
+        # 提取文件名（去掉路径）
+        base_name = os.path.basename(filename)
+        
+        if len(base_name) <= max_length:
+            return base_name
+        
+        # 分离文件名和扩展名
+        name_part, ext_part = os.path.splitext(base_name)
+        
+        # 计算可用的名称部分长度
+        if ext_part:
+            # 保留扩展名，需要至少3个字符（包括点）
+            min_ext_length = len(ext_part)
+            if min_ext_length > max_length - 3:
+                # 扩展名太长，直接截断
+                return base_name[:max_length - 3] + "..."
+            
+            # 计算名称部分的最大长度
+            max_name_length = max_length - min_ext_length - 3  # 3 for "..."
+            if max_name_length > 0:
+                truncated_name = name_part[:max_name_length] + "..."
+                return truncated_name + ext_part
+        
+        # 没有扩展名，直接截断
+        return base_name[:max_length - 3] + "..."
+    
     def calculate_file_hash_with_progress(self, file_path: str, file_size: int, 
                                           progress_callback: Callable[[int], None]) -> Optional[str]:
         """计算单个文件的哈希值，支持进度回调"""
@@ -220,7 +256,7 @@ class HashCalculator:
             filled = int(file_progress / 100 * progress_bar_len)
             progress_bar = f"{'█' * filled}{'░' * (progress_bar_len - filled)}"
             
-            line = f"\r    {self.format_size(file_size):>10s}  {short_path[:40]:<40} [{progress_bar}] {file_progress:5.1f}% | 组: {group_progress:5.1f}% | 总: {overall_progress:5.1f}%"
+            line = f"\r    {self.format_size(file_size):>10s}  {short_path:<40} [{progress_bar}] {file_progress:5.1f}% | 组: {group_progress:5.1f}% | 总: {overall_progress:5.1f}%"
             
             if len(line) > 120:
                 line = line[:120]
@@ -472,13 +508,13 @@ class HashCalculator:
                             if existing_hash:
                                 file_hash_map[file_path] = existing_hash
                 
-                short_path = file_path
-                if len(short_path) > 50:
-                    short_path = "..." + short_path[-47:]
+                short_path = self.truncate_filename(file_path, 40)
                 
                 if not self.quiet:
                     if should_skip:
-                        line = f"    {self.format_size(file_size):>10s}  {short_path[:40]:<40} [yellow]⏭️ {skip_reason}[/yellow]"
+                        line = f"    {self.format_size(file_size):>10s}  {short_path:<40} [yellow]⏭️ {skip_reason}[/yellow]"
+                        if len(line) > 120:
+                            line = line[:120]
                         console.print(line)
                         self.current_group_lines += 1
                         self.group_processed_size += file_size
@@ -512,7 +548,9 @@ class HashCalculator:
                     result['calculated'] += 1
                     
                     if not self.quiet:
-                        line = f"    {self.format_size(file_size):>10s}  {short_path[:40]:<40} [green]✅ 已计算[/green]"
+                        line = f"    {self.format_size(file_size):>10s}  {short_path:<40} [green]✅ 已计算[/green]"
+                        if len(line) > 120:
+                            line = line[:120]
                         console.print(line)
                         self.current_group_lines += 1
                 
