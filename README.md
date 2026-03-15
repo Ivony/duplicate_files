@@ -41,45 +41,113 @@
 ### 安装依赖
 
 ```bash
-pip install prompt-toolkit typer
+pip install prompt-toolkit typer rich
 ```
 
-## 使用方法
+## 🚀 快速上手指南
 
-### 交互式模式（推荐）
+### 第一步：扫描目录
 
-启动交互式命令行界面，支持自动补全：
-
-```bash
-python main.py
-```
-
-在交互式界面中：
-- 输入命令时按 `Tab` 键查看补全建议
-- 使用 `↑` `↓` 键浏览历史命令
-- 输入 `help` 查看帮助信息
-- 输入 `exit` 退出程序
-
-### 命令行模式
-
-直接执行命令：
+首先，您需要扫描目标目录以建立文件索引：
 
 ```bash
-# 查看帮助
-python main.py --help
-
-# 查看具体命令帮助
-python main.py index --help
-
-# 扫描目录
+# 扫描单个目录
 python main.py index scan D:\Downloads
 
-# 查看重复文件组
-python main.py show groups --top 10
-
-# 导出分析结果
-python main.py export csv analysis.csv
+# 扫描多个目录
+python main.py index scan D:\Downloads E:\Videos
 ```
+
+扫描完成后，系统会自动识别大小相同的文件并创建重复文件组。
+
+### 第二步：查看重复文件组
+
+查看扫描结果，了解重复文件的情况：
+
+```bash
+# 查看占用空间最大的前 20 组
+python main.py show groups
+
+# 查看更多组
+python main.py show groups --page 1 --page-size 30
+
+# 按文件数量排序
+python main.py show groups --sort count
+```
+
+### 第三步：计算哈希值（重要！）
+
+⚠️ **关键步骤**：在清理重复文件之前，**必须**先计算文件哈希值！
+
+**为什么需要计算哈希值？**
+
+- 扫描阶段仅根据文件大小识别重复，可能存在误判
+- 哈希值计算可以确认文件内容完全相同
+- **只有计算了哈希值的组才能进行实质性的清理操作**
+- 未计算哈希值的组只能查看，不能删除
+
+```bash
+# 计算所有重复文件组的哈希值
+python main.py hash calc
+
+# 仅计算新增文件的哈希值（更快）
+python main.py hash calc --mode new
+
+# 强制重新计算所有哈希值
+python main.py hash calc --mode force
+```
+
+### 第四步：验证结果
+
+计算完成后，再次查看重复文件组，确认哈希值状态：
+
+```bash
+# 查看已确认的重复文件组
+python main.py show groups
+
+# 查看详细信息
+python main.py show groups --detail <组ID>
+```
+
+### 第五步：安全清理
+
+确认无误后，可以进行清理操作：
+
+```bash
+# 模拟运行（推荐先执行）
+python main.py clean clean --dryrun --keep-newest
+
+# 生成清理脚本（安全方式）
+python main.py clean script cleanup.bat
+
+# 执行清理（谨慎操作）
+python main.py clean clean --keep-newest
+```
+
+## ⚠️ 重要安全提示
+
+### 哈希计算的重要性
+
+**在清理重复文件之前，必须先计算哈希值！**
+
+| 阶段 | 方法 | 准确性 | 是否可清理 |
+|------|------|--------|-----------|
+| 扫描阶段 | 文件大小 | 中等 | ❌ 不可清理 |
+| 哈希计算 | 文件内容哈希 | 100% | ✅ 可以清理 |
+
+**原因：**
+1. **扫描阶段**：仅根据文件大小识别重复，可能将不同内容但大小相同的文件误判为重复
+2. **哈希计算**：通过计算文件内容的哈希值，确保文件内容完全相同，避免误删
+3. **安全机制**：系统只允许清理已确认哈希值的重复文件组
+
+### 清理前的检查清单
+
+- [ ] 已完成目录扫描
+- [ ] 已查看重复文件组列表
+- [ ] **已计算所有目标组的哈希值**
+- [ ] 已验证哈希值状态为"已确认"
+- [ ] 已使用 `--dryrun` 模拟运行
+- [ ] 已备份重要数据
 
 ## 命令列表
 
@@ -90,13 +158,27 @@ python main.py export csv analysis.csv
 - `clear <pattern>` - 清除索引数据（支持通配符和路径）
 
 ### 📊 show - 显示数据
-- `groups` - 显示重复文件组列表
+- `groups` - 显示重复文件组列表（支持分页、排序、过滤）
+  - `--sort size/count/path/ext/hash` - 排序方式
+  - `--page N` - 页码
+  - `--page-size N` - 每页数量
+  - `--disk C:` - 按磁盘过滤
+  - `--min-size 100MB` - 最小文件大小
+  - `--extension .mp4` - 按扩展名过滤
+  - `--detail <ID>` - 查看详细信息
 - `files <pattern|path>` - 查询文件（支持路径或模式）
 - `hash <hash>` - 显示指定哈希值的所有文件
 - `stats` - 显示统计分析
 
 ### 🔐 hash - 哈希计算
 - `calc` - 计算文件哈希值
+  - `--mode default` - 默认模式，计算未计算哈希的文件
+  - `--mode new` - 仅计算从未计算过哈希的文件
+  - `--mode force` - 强制重新计算所有文件
+  - `--group-ids <IDs>` - 指定要计算的组ID
+- `status` - 查看哈希计算状态
+- `verify` - 验证哈希值完整性
+- `clear` - 清除哈希数据
 - `backup <path>` - 备份哈希数据
 - `restore <path>` - 恢复哈希数据
 
@@ -120,40 +202,63 @@ python main.py export csv analysis.csv
 - `init` - 重建数据库
 
 ### 🧹 clean - 清理
-- `clean` - 清理重复文件
+- `clean` - 清理重复文件（仅限已确认哈希值的组）
+  - `--dryrun` - 模拟运行，不实际删除
+  - `--keep-newest` - 保留最新文件
+  - `--keep-path <path>` - 保留指定路径的文件
 - `script <path>` - 生成清理脚本
 
 ## 使用示例
 
-### 1. 扫描目录并分析重复文件
+### 1. 完整工作流程
 
 ```bash
-# 交互式模式
-python main.py
-> index scan D:\Downloads
-
-# 命令行模式
+# 步骤 1: 扫描目录
 python main.py index scan D:\Downloads
+
+# 步骤 2: 查看重复文件组
+python main.py show groups --top 20
+
+# 步骤 3: 计算哈希值（重要！）
+python main.py hash calc
+
+# 步骤 4: 验证结果
+python main.py show groups
+
+# 步骤 5: 模拟清理
+python main.py clean clean --dryrun --keep-newest
+
+# 步骤 6: 执行清理
+python main.py clean clean --keep-newest
 ```
 
-### 2. 查看重复文件组
+### 2. 高级查询
 
 ```bash
-# 查看占用空间最大的前 10 组
-python main.py show groups --top 10
+# 查看特定磁盘的重复文件
+python main.py show groups --disk C:
 
-# 查看文件数量最多的前 10 组
-python main.py show groups --top 10 --by-count
+# 查看大文件重复组
+python main.py show groups --min-size 100MB
+
+# 查看特定扩展名的重复文件
+python main.py show groups --extension .mp4
+
+# 分页查看
+python main.py show groups --page 2 --page-size 10
 ```
 
-### 3. 查询特定路径的文件
+### 3. 按需计算哈希
 
 ```bash
-# 查询特定目录下的文件
-python main.py show files D:\Downloads
+# 仅计算特定组的哈希值
+python main.py hash calc --group-ids 123,456,789
 
-# 使用通配符查询
-python main.py show files "*.pdf"
+# 仅计算新增文件
+python main.py hash calc --mode new
+
+# 强制重新计算
+python main.py hash calc --mode force
 ```
 
 ### 4. 导出分析结果
@@ -169,16 +274,16 @@ python main.py export json duplicates.json
 python main.py export report report.txt
 ```
 
-### 5. 安全清理重复文件
+### 5. 安全清理
 
 ```bash
-# 模拟运行（不实际删除）
+# 模拟运行（推荐先执行）
 python main.py clean clean --dryrun --keep-newest
 
-# 生成清理脚本
+# 生成清理脚本（安全方式）
 python main.py clean script cleanup.bat
 
-# 执行清理
+# 执行清理（谨慎操作）
 python main.py clean clean --keep-newest
 ```
 
@@ -224,11 +329,15 @@ duplicate_files/
 │   ├── config.py      # 配置命令
 │   ├── db.py         # 数据库命令
 │   └── clean.py      # 清理命令
-├── src/                # 核心模块
+├── core/               # 核心模块
 │   ├── file_scanner.py # 文件扫描器
 │   ├── hash_calculator.py # 哈希计算器
-│   ├── duplicate_finder.py # 重复文件查找器
-│   └── database.py    # 数据库操作
+│   ├── index_manager.py # 索引管理器
+│   └── config_manager.py # 配置管理器
+├── tests/              # 测试模块
+│   ├── test_commands/ # 命令测试
+│   ├── test_core/     # 核心模块测试
+│   └── test_autocomplete/ # 自动补全测试
 └── README.md           # 项目文档
 ```
 
@@ -237,8 +346,46 @@ duplicate_files/
 - **Python 3.13+** - 主要编程语言
 - **Typer** - 命令行界面框架
 - **Prompt Toolkit** - 交互式命令行和补全
+- **Rich** - 终端格式化输出
 - **SQLite** - 数据库存储
 - **Standard Library** - 标准库（os, hashlib, sqlite3 等）
+
+## 最佳实践
+
+### 1. 工作流程建议
+
+1. **首次使用**：先扫描小目录测试功能
+2. **大规模扫描**：分批扫描，避免一次性扫描过多文件
+3. **哈希计算**：优先计算大文件组的哈希值
+4. **清理操作**：始终先使用 `--dryrun` 模拟运行
+
+### 2. 性能优化建议
+
+- 使用 `--mode new` 仅计算新增文件哈希
+- 定期使用 `db optimize` 优化数据库
+- 使用 `config limit` 限制扫描范围
+- 使用 `config exclude` 排除不需要的文件
+
+### 3. 安全建议
+
+- **始终先计算哈希值再清理**
+- 定期备份数据库：`db backup backup.db`
+- 使用 `--dryrun` 模拟清理操作
+- 生成清理脚本而不是直接删除
+
+## 常见问题
+
+### Q: 为什么扫描后不能直接清理重复文件？
+A: 扫描阶段仅根据文件大小识别重复，可能存在误判。必须先计算哈希值确认文件内容完全相同，才能安全清理。
+
+### Q: 哈希计算需要多长时间？
+A: 取决于文件大小和数量。大文件计算较慢，建议使用 `--mode new` 仅计算新增文件。
+
+### Q: 如何查看哪些组已计算哈希值？
+A: 使用 `show groups` 命令，哈希状态列会显示"✅ 已确认"或"⏳ 未确认"。
+
+### Q: 清理操作是否可逆？
+A: 文件删除是不可逆的！建议使用 `--dryrun` 模拟运行，或生成清理脚本手动执行。
 
 ## 贡献
 
