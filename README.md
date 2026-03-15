@@ -64,9 +64,14 @@ python main.py index scan D:\Downloads E:\Videos
 
 查看扫描结果，了解重复文件的情况：
 
+> **注意**：`show groups` 默认只显示**已确认哈希值**的组。扫描后未计算哈希值的组需要使用 `--unconfirmed` 参数查看。
+
 ```bash
-# 查看占用空间最大的前 20 组
+# 查看已确认哈希值的重复文件组（默认）
 python main.py show groups
+
+# 查看所有组，包括未计算哈希值的组
+python main.py show groups --unconfirmed
 
 # 查看更多组
 python main.py show groups --page 1 --page-size 30
@@ -158,7 +163,8 @@ python main.py clean clean --keep-newest
 - `clear <pattern>` - 清除索引数据（支持通配符和路径）
 
 ### 📊 show - 显示数据
-- `groups` - 显示重复文件组列表（支持分页、排序、过滤）
+- `groups` - 显示重复文件组列表（默认只显示已确认哈希值的组）
+  - `--unconfirmed` - 显示所有组，包括未计算哈希值的组
   - `--sort size/count/path/ext/hash` - 排序方式
   - `--page N` - 页码
   - `--page-size N` - 每页数量
@@ -377,6 +383,9 @@ duplicate_files/
 
 ### Q: 为什么扫描后不能直接清理重复文件？
 A: 扫描阶段仅根据文件大小识别重复，可能存在误判。必须先计算哈希值确认文件内容完全相同，才能安全清理。
+
+### Q: 为什么 `show groups` 看不到刚扫描的文件组？
+A: `show groups` 默认只显示已确认哈希值的组。刚扫描的文件组尚未计算哈希值，需要使用 `--unconfirmed` 参数查看：`python main.py show groups --unconfirmed`
 
 ### Q: 哈希计算需要多长时间？
 A: 取决于文件大小和数量。大文件计算较慢，建议使用 `--mode new` 仅计算新增文件。
