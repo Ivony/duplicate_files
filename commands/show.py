@@ -4,6 +4,7 @@ import os
 from typing import Optional
 from datetime import datetime
 from rich.console import Console
+from rich.table import Table
 from commands.db import get_db_path
 
 class DataViewer:
@@ -194,7 +195,7 @@ class DataViewer:
             'db_size': db_size
         }
     
-    def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size'):
+    def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size', page=1, page_size=20, disk=None):
         """获取重复文件组列表
         
         Args:
@@ -203,7 +204,10 @@ class DataViewer:
             min_size: 最小文件大小（字节）
             max_size: 最大文件大小（字节）
             extension: 文件扩展名过滤
-            sort_by: 排序方式（size/count/path）
+            sort_by: 排序方式（size/count/path/ext/hash）
+            page: 页码
+            page_size: 每页大小
+            disk: 按磁盘过滤
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -231,6 +235,11 @@ class DataViewer:
             conditions.append("f.Filename LIKE ?")
             params.append(f"{self.path_limit}%")
         
+        if disk:
+            # 按磁盘过滤（Windows: 盘符，如 C:, D: 等）
+            conditions.append("UPPER(SUBSTR(f.Filename, 1, 2)) = ?")
+            params.append(disk.upper())
+        
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         
         # 构建ORDER BY
@@ -240,6 +249,10 @@ class DataViewer:
             order_by = "ORDER BY COUNT(*) DESC"
         elif sort_by == 'path':
             order_by = "ORDER BY MIN(f.Filename)"
+        elif sort_by == 'ext':
+            order_by = "ORDER BY dg.Extension, (COUNT(*) - 1) * dg.Size DESC"
+        elif sort_by == 'hash':
+            order_by = "ORDER BY dg.Hash"
         else:
             order_by = "ORDER BY (COUNT(*) - 1) * dg.Size DESC"
         
@@ -253,7 +266,7 @@ class DataViewer:
             {where_clause}
             GROUP BY dg.ID
             {order_by}
-            LIMIT ?
+            LIMIT ? OFFSET ?
             '''
         else:
             query = f'''
@@ -263,26 +276,80 @@ class DataViewer:
             {where_clause}
             GROUP BY dg.ID
             {order_by}
-            LIMIT ?
+            LIMIT ? OFFSET ?
             '''
         
-        params.append(count)
+        # 计算偏移量
+        offset = (page - 1) * page_size
+        params.extend([page_size, offset])
         cursor.execute(query, params)
         groups = cursor.fetchall()
         
+        # 获取总记录数
+        count_query = f'''
+        SELECT COUNT(DISTINCT dg.ID)
+        FROM duplicate_groups dg
+        INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+        {where_clause}
+        '''
+        cursor.execute(count_query, params[:-2])  # 移除 LIMIT 和 OFFSET 参数
+        total_count = cursor.fetchone()[0]
+        
         result = []
         for group_id, size, ext, file_count, hash_val in groups:
+            # 获取组内前3个文件作为预览
+            cursor.execute('''
+            SELECT f.Filename
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE df.Group_ID = ?
+            ORDER BY f.Filename
+            LIMIT 3
+            ''', (group_id,))
+            files = [f[0] for f in cursor.fetchall()]
+            
+            # 智能截断文件路径
+            truncated_files = []
+            for filepath in files:
+                if len(filepath) > 50:
+                    # 保留文件名和扩展名
+                    filename = os.path.basename(filepath)
+                    if len(filename) > 30:
+                        name_part, ext_part = os.path.splitext(filename)
+                        if ext_part:
+                            truncated_name = name_part[:27] + "..." + ext_part
+                        else:
+                            truncated_name = filename[:30] + "..."
+                        truncated_files.append(".../" + truncated_name)
+                    else:
+                        # 保留完整文件名，截断路径
+                        path_part = os.path.dirname(filepath)
+                        if len(path_part) > 20:
+                            truncated_path = "..." + path_part[-17:]
+                            truncated_files.append(truncated_path + "/" + filename)
+                        else:
+                            truncated_files.append(filepath)
+                else:
+                    truncated_files.append(filepath)
+            
             result.append({
                 'group_id': group_id,
                 'size': size,
                 'extension': ext,
                 'file_count': file_count,
                 'savable_space': (file_count - 1) * size,
-                'hash': hash_val
+                'hash': hash_val,
+                'files': truncated_files
             })
         
         conn.close()
-        return result
+        return {
+            'groups': result,
+            'total_count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_count + page_size - 1) // page_size
+        }
     
     def get_group_details(self, group_id):
         """获取指定组的详细信息
@@ -615,11 +682,16 @@ def groups(
     max_size: Optional[str] = None,
     extension: Optional[str] = None,
     sort: str = "size",
-    detail: Optional[int] = None
+    detail: Optional[int] = None,
+    page: int = 1,
+    page_size: int = 20,
+    disk: Optional[str] = None
 ):
     """[bold]显示重复文件组列表[/bold]
     
     [dim]显示已确认的重复文件组，按大小排序[/dim]
+    
+    [dim]排序选项: size (大小), count (数量), path (路径), ext (扩展名), hash (哈希值)[/dim]
     """
     console = Console()
     hash_only = not unconfirmed
@@ -651,37 +723,93 @@ def groups(
         _show_group_detail(detail)
         return
     
-    groups = analyzer.get_groups_list(
-        count=top,
+    # 获取组列表
+    result = analyzer.get_groups_list(
         hash_only=hash_only,
         min_size=parsed_min_size,
         max_size=parsed_max_size,
         extension=extension,
-        sort_by=sort
+        sort_by=sort,
+        page=page,
+        page_size=page_size,
+        disk=disk
     )
+    
+    groups = result['groups']
+    total_count = result['total_count']
+    current_page = result['page']
+    current_page_size = result['page_size']
+    total_pages = result['total_pages']
     
     console.print()
     console.print("[bold blue]📁 重复文件组列表[/bold blue]")
     console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
     console.print()
     
+    # 显示统计信息
+    if total_count > 0:
+        # 计算总可释放空间和平均文件数
+        total_savable = sum(group['savable_space'] for group in groups)
+        avg_file_count = sum(group['file_count'] for group in groups) / len(groups) if groups else 0
+        
+        console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组")
+        console.print(f"  [bold]分页信息:[/bold] 第 [green]{current_page}[/green] / {total_pages} 页 | 每页显示 [green]{current_page_size}[/green] 个组")
+        console.print()
+    
     if not groups:
         console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
     else:
+        # 创建表格
+        table = Table(show_header=True, header_style="bold blue", border_style="dim")
+        table.add_column("组ID", width=8, style="cyan")
+        table.add_column("大小", width=12, style="bold")
+        table.add_column("扩展名", width=10)
+        table.add_column("文件数", width=8, justify="center")
+        table.add_column("可释放空间", width=15)
+        table.add_column("哈希状态", width=12)
+        table.add_column("示例文件", width=50)
+        
         for group in groups:
-            console.print(f"  [cyan]组ID: {group['group_id']}[/cyan]")
-            console.print("  [dim]───────────────────────────────────────────────[/dim]")
-            console.print(f"    文件大小      {format_size_colored(group['size'])}")
-            console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
-            console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
-            console.print(f"    可释放空间    {format_size_colored(group['savable_space'])}")
+            # 格式化哈希状态
             if group['hash']:
-                console.print(f"    哈希值        [dim]{group['hash'][:16]}...[/dim]")
+                hash_status = "✅ 已确认"
             else:
-                console.print(f"    哈希值        [yellow]未确认[/yellow]")
+                hash_status = "⏳ 未确认"
+            
+            # 格式化文件预览
+            files_preview = "\n".join(group['files'][:3])
+            if len(group['files']) > 3:
+                files_preview += f"\n... 还有 {len(group['files']) - 3} 个文件"
+            
+            table.add_row(
+                str(group['group_id']),
+                format_size_colored(group['size']),
+                group['extension'] or "(无)",
+                str(group['file_count']),
+                format_size_colored(group['savable_space']),
+                hash_status,
+                files_preview
+            )
+        
+        console.print(table)
+        console.print()
+        
+        # 显示分页导航
+        if total_pages > 1:
+            console.print("  [bold]分页导航:[/bold]")
+            console.print(f"    使用 --page 1-{total_pages} 切换页码")
+            console.print(f"    使用 --page-size N 设置每页显示数量")
             console.print()
     
     console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+    console.print()
+    console.print("  [bold]提示:[/bold]")
+    console.print("    --sort size/count/path/ext/hash 切换排序方式")
+    console.print("    --min-size/--max-size 按大小过滤")
+    console.print("    --extension 按扩展名过滤")
+    console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
+    console.print("    --page/--page-size 分页控制")
+    console.print("    --detail <组ID> 查看详细信息")
     console.print()
 
 @app.command()
