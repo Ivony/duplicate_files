@@ -336,7 +336,7 @@ class HashCalculator:
                     console.print(f"  [yellow]⏳[/yellow] 第 {group_idx}/{total_groups} 组 (ID: {group_id})  扩展名: {extension}  大小: {self.format_size(size)}  文件数: {file_count}")
                     console.print(f"  [dim]───────────────────────────────────────────────[/dim]")
                     console.print()
-                    self.current_group_lines = 0
+                    self.current_group_lines = 4  # 组信息共4行
                     self.current_file_progress_line = 0
                 
                 result = self.process_group(group_id, mode, extension, size, file_count)
