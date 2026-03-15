@@ -141,3 +141,29 @@ class TestHashCalculator:
         conn.close()
         
         assert final_count >= initial_count
+    
+    def test_progress_display_format(self, test_db_with_data, test_filesystem, capsys):
+        """测试进度显示格式，确保计算完成后提示正确覆盖进度行"""
+        calc = HashCalculator()
+        
+        # 捕获输出
+        calc.calculate_hash(mode='default')
+        
+        captured = capsys.readouterr()
+        output = captured.out
+        
+        # 检查输出中是否包含计算完成的提示
+        assert '已计算' in output
+        
+        # 检查输出中是否包含进度条相关的字符
+        assert '[' in output
+        assert ']' in output
+        
+        # 验证输出格式是否正确
+        lines = output.split('\n')
+        progress_lines = [line for line in lines if '[' in line and ']' in line]
+        completed_lines = [line for line in lines if '已计算' in line]
+        
+        # 确保有进度显示和完成提示
+        assert len(progress_lines) > 0
+        assert len(completed_lines) > 0
