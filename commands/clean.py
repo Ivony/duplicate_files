@@ -34,6 +34,8 @@ SORT_STRATEGIES = [
     'newest', 'oldest',
     'longest-name', 'shortest-name',
     'longest-path', 'shortest-path',
+    'name-asc', 'name-desc',
+    'path-asc', 'path-desc',
     'deepest', 'shallowest'
 ]
 
@@ -88,6 +90,10 @@ class FileCleaner:
             'shortest-name': '保留文件名最短的文件',
             'longest-path': '保留路径最长的文件',
             'shortest-path': '保留路径最短的文件',
+            'name-asc': '按文件名升序保留第一个',
+            'name-desc': '按文件名降序保留第一个',
+            'path-asc': '按路径升序保留第一个',
+            'path-desc': '按路径降序保留第一个',
             'deepest': '保留目录最深的文件',
             'shallowest': '保留目录最浅的文件'
         }
@@ -97,15 +103,36 @@ class FileCleaner:
         def key_func(file_info):
             return {
                 'newest': (file_info['modified'],),
-                'oldest': (-file_info['modified'],),
-                'longest-name': (-len(file_info['filename']),),
+                'oldest': (file_info['modified'],),
+                'longest-name': (len(file_info['filename']),),
                 'shortest-name': (len(file_info['filename']),),
-                'longest-path': (-len(file_info['filepath']),),
+                'longest-path': (len(file_info['filepath']),),
                 'shortest-path': (len(file_info['filepath']),),
-                'deepest': (-file_info['depth'],),
+                'name-asc': (file_info['filename'],),
+                'name-desc': (file_info['filename'],),
+                'path-asc': (file_info['filepath'],),
+                'path-desc': (file_info['filepath'],),
+                'deepest': (file_info['depth'],),
                 'shallowest': (file_info['depth'],)
             }.get(self.sort_strategy, (file_info['modified'],))
         return key_func
+    
+    def get_sort_reverse(self):
+        reverse_map = {
+            'newest': True,
+            'oldest': False,
+            'longest-name': True,
+            'shortest-name': False,
+            'longest-path': True,
+            'shortest-path': False,
+            'name-asc': False,
+            'name-desc': True,
+            'path-asc': False,
+            'path-desc': True,
+            'deepest': True,
+            'shallowest': False
+        }
+        return reverse_map.get(self.sort_strategy, True)
     
     def get_groups(self):
         conn = self.get_connection()
@@ -181,10 +208,10 @@ class FileCleaner:
     
     def select_keep_file(self, files, group_id=None):
         if self.auto_select:
-            files.sort(key=self.get_sort_key())
+            files.sort(key=self.get_sort_key(), reverse=self.get_sort_reverse())
             return files[0]
         
-        files.sort(key=self.get_sort_key())
+        files.sort(key=self.get_sort_key(), reverse=self.get_sort_reverse())
         
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("序号", width=6, justify="center")
@@ -312,7 +339,7 @@ class FileCleaner:
             files = self.get_group_files(group_id)
             
             if self.auto_select:
-                files.sort(key=self.get_sort_key())
+                files.sort(key=self.get_sort_key(), reverse=self.get_sort_reverse())
                 self.selections[group_id] = {
                     'keep': files[0],
                     'remove': files[1:],

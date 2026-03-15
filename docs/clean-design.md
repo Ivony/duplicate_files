@@ -59,6 +59,10 @@ clean <action> [options]
 | `shortest-name` | 保留文件名最短的文件 |
 | `longest-path` | 保留路径最长的文件 |
 | `shortest-path` | 保留路径最短的文件 |
+| `name-asc` | 按文件名升序保留第一个 |
+| `name-desc` | 按文件名降序保留第一个 |
+| `path-asc` | 按路径升序保留第一个 |
+| `path-desc` | 按路径降序保留第一个 |
 | `deepest` | 保留目录层级最深的文件 |
 | `shallowest` | 保留目录层级最浅的文件 |
 
