@@ -33,6 +33,10 @@ def _get_key_non_blocking(timeout: float = 0.1) -> Optional[str]:
                     return '\x1b[5~'
                 elif ch2 == b'Q':
                     return '\x1b[6~'
+                elif ch2 == b'G':
+                    return '\x1b[H'
+                elif ch2 == b'O':
+                    return '\x1b[F'
             return ch.decode('utf-8', errors='ignore')
         return None
     else:
@@ -64,6 +68,16 @@ def _get_key_non_blocking(timeout: float = 0.1) -> Optional[str]:
                                 elif ch3 == '6':
                                     sys.stdin.read(1)
                                     return '\x1b[6~'
+                                elif ch3 == 'H':
+                                    return '\x1b[H'
+                                elif ch3 == 'F':
+                                    return '\x1b[F'
+                                elif ch3 == '1':
+                                    sys.stdin.read(1)
+                                    return '\x1b[1~'
+                                elif ch3 == '4':
+                                    sys.stdin.read(1)
+                                    return '\x1b[4~'
                 return ch
             return None
         finally:
@@ -178,7 +192,9 @@ class BlockPager:
         lines.append(f"[bold cyan]{self.title}[/bold cyan] | [bold]总数:[/bold] [green]{self.total_blocks:,}[/green] | [bold]当前:[/bold] {start_idx + 1}-{end_idx} | [bold]排序:[/bold] {self._get_sort_display()}")
         lines.append(f"[dim]{separator}[/dim]")
         
-        for block in visible_blocks:
+        for i, block in enumerate(visible_blocks):
+            if i > 0:
+                lines.append(f"[dim]{separator}[/dim]")
             lines.append(block)
         
         if not visible_blocks:
@@ -186,7 +202,7 @@ class BlockPager:
         
         lines.append("")
         lines.append(f"[dim]{separator}[/dim]")
-        lines.append("[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | g/G 首尾 | q 退出[/dim]")
+        lines.append("[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | Home/End 首尾 | q 退出[/dim]")
         
         return "\n".join(lines)
     
@@ -217,9 +233,9 @@ class BlockPager:
                         self.current_block_idx = max(0, self.current_block_idx - self.blocks_per_screen)
                     elif key == "\x1b[6~":
                         self.current_block_idx = min(self.total_blocks - self.blocks_per_screen, self.current_block_idx + self.blocks_per_screen)
-                    elif key == "g":
+                    elif key == "\x1b[H" or key == "\x1b[1~":
                         self.current_block_idx = 0
-                    elif key == "G":
+                    elif key == "\x1b[F" or key == "\x1b[4~":
                         self.current_block_idx = max(0, self.total_blocks - self.blocks_per_screen)
                     
                     live.update(self._render_content())
@@ -1196,7 +1212,6 @@ def groups(
             ext_display = group['extension'] or "(无)"
             
             block_lines = [
-                "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]",
                 f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}"
             ]
             
