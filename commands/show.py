@@ -195,7 +195,7 @@ class DataViewer:
             'db_size': db_size
         }
     
-    def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size', page=1, page_size=20, disk=None):
+    def get_groups_list(self, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size', page=1, page_size=20, disk=None, hash_value=None):
         """获取重复文件组列表
         
         Args:
@@ -208,6 +208,7 @@ class DataViewer:
             page: 页码
             page_size: 每页大小
             disk: 按磁盘过滤
+            hash_value: 按哈希值过滤
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -236,9 +237,12 @@ class DataViewer:
             params.append(f"{self.path_limit}%")
         
         if disk:
-            # 按磁盘过滤（Windows: 盘符，如 C:, D: 等）
             conditions.append("UPPER(SUBSTR(f.Filename, 1, 2)) = ?")
             params.append(disk.upper())
+        
+        if hash_value:
+            conditions.append("dg.Hash LIKE ?")
+            params.append(f"{hash_value}%")
         
         where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         
@@ -682,6 +686,7 @@ def groups(
     sort: str = "size",
     detail: Optional[int] = None,
     disk: Optional[str] = None,
+    hash_value: Optional[str] = None,
     pager: bool = True
 ):
     """[bold]显示重复文件组列表[/bold]
@@ -728,7 +733,8 @@ def groups(
         sort_by=sort,
         page=1,
         page_size=999999,
-        disk=disk
+        disk=disk,
+        hash_value=hash_value
     )
     
     groups = result['groups']
@@ -736,7 +742,10 @@ def groups(
     
     def render_output():
         console.print()
-        console.print("[bold blue]📁 重复文件组列表[/bold blue]")
+        if hash_value:
+            console.print(f"[bold blue]📁 哈希值 {hash_value[:16]}... 的重复文件组[/bold blue]")
+        else:
+            console.print("[bold blue]📁 重复文件组列表[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
         
@@ -780,6 +789,7 @@ def groups(
         console.print("    --min-size/--max-size 按大小过滤")
         console.print("    --extension 按扩展名过滤")
         console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
+        console.print("    --hash 按哈希值过滤")
         console.print("    --detail <组ID> 查看详细信息")
         console.print("    --no-pager 禁用分页器")
         console.print()
@@ -958,64 +968,6 @@ def files(
                 console.print()
                 console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
                 console.print()
-    
-    if pager:
-        with console.pager(styles=True):
-            render_output()
-    else:
-        render_output()
-
-@app.command()
-def hash(hash_value: str, pager: bool = True):
-    """[bold]显示指定哈希值的所有文件[/bold]
-    
-    [dim]根据哈希值查找所有重复文件[/dim]
-    """
-    console = Console()
-    files = analyzer.get_duplicate_details(hash_value)
-    
-    def format_size(size):
-        if size >= 1073741824:
-            return f"{size/1073741824:.2f} GB"
-        elif size >= 1048576:
-            return f"{size/1048576:.2f} MB"
-        elif size >= 1024:
-            return f"{size/1024:.2f} KB"
-        else:
-            return f"{size} B"
-    
-    def format_size_colored(size):
-        if size >= 1073741824:
-            return f"[bold red]{size/1073741824:.2f} GB[/bold red]"
-        elif size >= 1048576:
-            return f"[bold yellow]{size/1048576:.2f} MB[/bold yellow]"
-        elif size >= 1024:
-            return f"[bold green]{size/1024:.2f} KB[/bold green]"
-        else:
-            return f"[bold]{size} B[/bold]"
-    
-    def render_output():
-        console.print()
-        console.print(f"[bold blue]🔑 哈希值 {hash_value[:16]}... 的重复文件[/bold blue]")
-        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-        console.print()
-        
-        if not files:
-            console.print("  [dim]没有找到文件[/dim]")
-        else:
-            for i, file_info in enumerate(files, 1):
-                console.print(f"  [cyan]{i}. 文件路径[/cyan]")
-                console.print(f"    {file_info['filepath']}")
-                console.print("  [dim]───────────────────────────────────────────────[/dim]")
-                console.print(f"    磁盘        [bold]{file_info['disk']}[/bold]")
-                console.print(f"    大小        {format_size_colored(file_info['size'])}")
-                console.print(f"    修改时间    [dim]{file_info['modified']}[/dim]")
-                console.print(f"    哈希值      [dim]{file_info['hash'][:16]}...[/dim]")
-                console.print(f"    计算时间    [dim]{file_info['created_at']}[/dim]")
-                console.print()
-        
-        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-        console.print()
     
     if pager:
         with console.pager(styles=True):
