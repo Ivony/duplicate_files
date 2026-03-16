@@ -140,6 +140,104 @@ class TestTyperCompleter:
         assert 'clear' in result_texts
 
 
+class TestOptionCompletion:
+    """测试命令选项补全功能"""
+    
+    def test_clean_delete_options_after_subcommand(self):
+        """测试clean delete子命令后的选项补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean delete ' 应该显示选项
+        document = Document('clean delete ', 13)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该包含clean delete的选项
+        assert '--yes' in result_texts
+        assert '--mode' in result_texts
+        assert '--strategy' in result_texts
+        assert '--script' in result_texts
+        assert '--group' in result_texts
+    
+    def test_clean_link_options_after_subcommand(self):
+        """测试clean link子命令后的选项补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean link ' 应该显示选项
+        document = Document('clean link ', 11)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该包含clean link的选项
+        assert '--yes' in result_texts
+        assert '--mode' in result_texts
+        assert '--strategy' in result_texts
+    
+    def test_option_prefix_completion(self):
+        """测试选项前缀补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean delete --s' 应该补全为 '--strategy' 和 '--script'
+        document = Document('clean delete --s', 16)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        assert '--strategy' in result_texts
+        assert '--script' in result_texts
+        assert '--yes' not in result_texts  # 不匹配前缀
+    
+    def test_option_prefix_completion_single_match(self):
+        """测试选项前缀补全单个匹配"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean delete --y' 应该补全为 '--yes'
+        document = Document('clean delete --y', 16)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        assert '--yes' in result_texts
+        assert len(result_texts) == 1
+    
+    def test_option_after_option_value(self):
+        """测试选项值后的选项补全"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean delete --strategy newest ' 应该显示其他选项
+        document = Document('clean delete --strategy newest ', 31)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        # 应该包含其他未使用的选项
+        assert '--yes' in result_texts
+        assert '--mode' in result_texts
+        # 不应该包含已使用的选项
+        assert '--strategy' not in result_texts
+    
+    def test_used_option_not_shown(self):
+        """测试已使用的选项不再显示"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'clean delete --yes ' 不应该再显示 --yes
+        document = Document('clean delete --yes ', 19)
+        result = list(completer.get_completions(document, None))
+        result_texts = [c.text for c in result]
+        
+        assert '--yes' not in result_texts
+        assert '--mode' in result_texts
+        assert '--strategy' in result_texts
+    
+    def test_index_scan_no_options(self):
+        """测试index scan命令没有选项"""
+        completer = TyperCompleter(app)
+        
+        # 输入 'index scan ' 不应该显示选项（只有路径参数）
+        document = Document('index scan ', 11)
+        result = list(completer.get_completions(document, None))
+        
+        # index scan 只有位置参数，没有选项
+        assert len(result) == 0
+
+
 class TestAutocomplete:
     """测试命令行自动补全功能"""
     

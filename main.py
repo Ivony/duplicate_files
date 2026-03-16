@@ -42,6 +42,7 @@ class TyperCompleter(Completer):
         self.app = app
         self.root_commands = {}  # 根命令 -> 子命令列表
         self.standalone_commands = []  # 独立命令（如version, help）
+        self.command_options = {}  # (root_cmd, sub_cmd) -> 选项列表
         self.path_completion_commands = {
             # 必须是现有文件
             ('index', 'import'): PathCompleter(file_filter=lambda path: path.endswith('.csv')),
@@ -62,6 +63,44 @@ class TyperCompleter(Completer):
             ('db', 'backup_file_hash'): PathCompleter(),
         }
         self._extract_commands()
+    
+    def _extract_options_from_callback(self, callback):
+        """从回调函数的参数中提取选项信息"""
+        options = []
+        if callback is None:
+            return options
+        
+        # 获取函数的参数规范
+        import inspect
+        sig = inspect.signature(callback)
+        
+        for param_name, param in sig.parameters.items():
+            # 跳过特殊的参数
+            if param_name in ('ctx', 'context'):
+                continue
+            
+            # 检查参数默认值是否是 Typer Option
+            if param.default is not inspect.Parameter.empty:
+                # 尝试提取选项名称
+                option_names = []
+                
+                # 检查是否有 __metadata__ (Typer 选项的元数据)
+                if hasattr(param.default, '__metadata__'):
+                    metadata = param.default.__metadata__
+                    if isinstance(metadata, tuple) and len(metadata) > 0:
+                        option_info = metadata[0]
+                        if hasattr(option_info, 'param_decls'):
+                            option_names.extend(option_info.param_decls)
+                
+                # 如果没有找到选项名，使用参数名生成
+                if not option_names:
+                    # 将参数名转换为 --param-name 格式
+                    option_name = '--' + param_name.replace('_', '-')
+                    option_names.append(option_name)
+                
+                options.extend(option_names)
+        
+        return options
     
     def _extract_commands(self):
         """从Typer应用中提取命令信息"""
@@ -85,6 +124,12 @@ class TyperCompleter(Completer):
                         subcommand_name = subcommand_info.callback.__name__
                     if subcommand_name is not None:
                         sub_commands.append(subcommand_name)
+                        
+                        # 提取该子命令的选项
+                        callback = getattr(subcommand_info, 'callback', None)
+                        options = self._extract_options_from_callback(callback)
+                        if options:
+                            self.command_options[(command_name, subcommand_name)] = options
                 self.root_commands[command_name] = sub_commands
             else:
                 # 独立命令
@@ -311,8 +356,8 @@ class TyperCompleter(Completer):
                 for subcmd in self.root_commands[root_cmd]:
                     yield Completion(subcmd, start_position=0)
         
-        elif len(words) == 2:
-            # 输入两个词：可能是根命令 + 子命令前缀
+        elif len(words) == 2 and not ends_with_space:
+            # 输入两个词且不以空格结尾：可能是根命令 + 子命令前缀
             root_cmd = words[0].lower()  # 大小写不敏感
             subcmd_prefix = words[1].lower()
             
@@ -331,6 +376,69 @@ class TyperCompleter(Completer):
                     # 大小写不敏感的前缀匹配
                     if subcmd.lower().startswith(subcmd_prefix):
                         yield Completion(subcmd, start_position=-len(words[-1]))
+        
+        elif len(words) >= 2 and ends_with_space:
+            # 输入两个或更多词且以空格结尾：显示该子命令的选项
+            root_cmd = words[0]
+            sub_cmd = words[1]
+            
+            # 查找匹配的命令
+            matched_root_cmd = None
+            matched_sub_cmd = None
+            for cmd in self.root_commands:
+                if cmd.lower() == root_cmd.lower():
+                    matched_root_cmd = cmd
+                    for subcmd in self.root_commands[cmd]:
+                        if subcmd.lower() == sub_cmd.lower():
+                            matched_sub_cmd = subcmd
+                            break
+                    break
+            
+            if matched_root_cmd and matched_sub_cmd:
+                key = (matched_root_cmd, matched_sub_cmd)
+                if key in self.command_options:
+                    # 获取已使用的选项
+                    used_options = set()
+                    for word in words[2:]:
+                        if is_option(word):
+                            used_options.add(word)
+                    
+                    # 显示未使用的选项
+                    for option in self.command_options[key]:
+                        if option not in used_options:
+                            yield Completion(option, start_position=0)
+        
+        elif len(words) >= 3 and is_option(words[-1]):
+            # 输入三个或更多词且最后一个词是选项前缀：补全选项
+            root_cmd = words[0]
+            sub_cmd = words[1]
+            option_prefix = words[-1].lower()
+            
+            # 查找匹配的命令
+            matched_root_cmd = None
+            matched_sub_cmd = None
+            for cmd in self.root_commands:
+                if cmd.lower() == root_cmd.lower():
+                    matched_root_cmd = cmd
+                    for subcmd in self.root_commands[cmd]:
+                        if subcmd.lower() == sub_cmd.lower():
+                            matched_sub_cmd = subcmd
+                            break
+                    break
+            
+            if matched_root_cmd and matched_sub_cmd:
+                key = (matched_root_cmd, matched_sub_cmd)
+                if key in self.command_options:
+                    # 获取已使用的选项
+                    used_options = set()
+                    for word in words[2:-1]:
+                        if is_option(word):
+                            used_options.add(word)
+                    
+                    # 匹配并显示未使用的选项
+                    for option in self.command_options[key]:
+                        if option not in used_options and option.lower().startswith(option_prefix):
+                            yield Completion(option, start_position=-len(words[-1]))
 
 
 def interactive_mode():
