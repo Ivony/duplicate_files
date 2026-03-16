@@ -675,15 +675,12 @@ analyzer = DataViewer()
 
 @app.command()
 def groups(
-    top: int = 20,
     unconfirmed: bool = False,
     min_size: Optional[str] = None,
     max_size: Optional[str] = None,
     extension: Optional[str] = None,
     sort: str = "size",
     detail: Optional[int] = None,
-    page: int = 1,
-    page_size: int = 20,
     disk: Optional[str] = None,
     pager: bool = True
 ):
@@ -729,16 +726,13 @@ def groups(
         max_size=parsed_max_size,
         extension=extension,
         sort_by=sort,
-        page=page,
-        page_size=page_size,
+        page=1,
+        page_size=999999,
         disk=disk
     )
     
     groups = result['groups']
     total_count = result['total_count']
-    current_page = result['page']
-    current_page_size = result['page_size']
-    total_pages = result['total_pages']
     
     def render_output():
         console.print()
@@ -751,7 +745,6 @@ def groups(
             avg_file_count = sum(group['file_count'] for group in groups) / len(groups) if groups else 0
             
             console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组")
-            console.print(f"  [bold]分页信息:[/bold] 第 [green]{current_page}[/green] / {total_pages} 页 | 每页显示 [green]{current_page_size}[/green] 个组")
             console.print()
         
         if not groups:
@@ -779,12 +772,6 @@ def groups(
             
             console.print(separator)
             console.print()
-            
-            if total_pages > 1:
-                console.print("  [bold]分页导航:[/bold]")
-                console.print(f"    使用 --page 1-{total_pages} 切换页码")
-                console.print(f"    使用 --page-size N 设置每页显示数量")
-                console.print()
         
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
@@ -793,7 +780,6 @@ def groups(
         console.print("    --min-size/--max-size 按大小过滤")
         console.print("    --extension 按扩展名过滤")
         console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
-        console.print("    --page/--page-size 分页控制")
         console.print("    --detail <组ID> 查看详细信息")
         console.print("    --no-pager 禁用分页器")
         console.print()
