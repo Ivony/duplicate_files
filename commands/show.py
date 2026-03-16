@@ -1,11 +1,126 @@
 import typer
 import sqlite3
 import os
-from typing import Optional
+import shutil
+from typing import Optional, List
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
+from rich.live import Live
+from rich.text import Text
 from commands.db import get_db_path
+
+
+class BlockPager:
+    """块级分页器 - 使用Rich Live实现多行文本块分页显示"""
+    
+    def __init__(self, blocks: List[str], console: Console = None, title: str = "数据列表"):
+        """
+        初始化块级分页器
+        
+        Args:
+            blocks: 文本块列表，每个元素是一个完整的多行文本块
+            console: Rich Console实例
+            title: 标题
+        """
+        self.blocks = blocks
+        self.console = console or Console(emoji=True)
+        self.title = title
+        self.total_blocks = len(blocks)
+        self.current_block_idx = 0
+        self.blocks_per_screen = 1
+        self.block_heights = []
+        self._calculate_screen_capacity()
+    
+    def _calculate_screen_capacity(self):
+        """计算屏幕容量和每个块的高度"""
+        terminal_height = shutil.get_terminal_size().lines
+        reserved_lines = 8
+        available_height = terminal_height - reserved_lines
+        
+        self.block_heights = []
+        for block in self.blocks:
+            lines = block.count('\n') + 1
+            self.block_heights.append(lines)
+        
+        if not self.block_heights:
+            self.blocks_per_screen = 1
+            return
+        
+        total_height = 0
+        count = 0
+        for height in self.block_heights:
+            if total_height + height <= available_height:
+                total_height += height
+                count += 1
+            else:
+                break
+        
+        self.blocks_per_screen = max(1, count)
+    
+    def _get_visible_blocks(self) -> List[str]:
+        """获取当前可见的文本块"""
+        start = self.current_block_idx
+        end = min(start + self.blocks_per_screen, self.total_blocks)
+        return self.blocks[start:end]
+    
+    def _render_content(self) -> Panel:
+        """渲染当前内容"""
+        visible_blocks = self._get_visible_blocks()
+        
+        content = Text()
+        
+        start_idx = self.current_block_idx
+        end_idx = start_idx + len(visible_blocks)
+        
+        header = f"总数: {self.total_blocks} | 当前: {start_idx + 1}-{end_idx}"
+        content.append(header + "\n\n", style="bold cyan")
+        
+        for i, block in enumerate(visible_blocks):
+            if i > 0:
+                content.append("\n")
+            content.append(block)
+        
+        if not visible_blocks:
+            content.append("没有数据", style="dim")
+        
+        footer = "\n\n[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | q 退出[/dim]"
+        content.append(footer)
+        
+        return Panel(content, title=f"[bold]{self.title}[/bold]", border_style="blue")
+    
+    def run(self):
+        """启动交互式分页显示"""
+        if not self.blocks:
+            self.console.print(Panel("没有数据", title=f"[bold]{self.title}[/bold]", border_style="blue"))
+            return
+        
+        with Live(self._render_content(), console=self.console, refresh_per_second=4) as live:
+            while True:
+                try:
+                    key = self.console.input("", password=True)
+                    
+                    if key == "q" or key == "Q":
+                        break
+                    elif key == "\x1b[A" or key == "k":
+                        self.current_block_idx = max(0, self.current_block_idx - 1)
+                    elif key == "\x1b[B" or key == "j":
+                        self.current_block_idx = min(self.total_blocks - self.blocks_per_screen, self.current_block_idx + 1)
+                    elif key == "\x1b[5~":
+                        self.current_block_idx = max(0, self.current_block_idx - self.blocks_per_screen)
+                    elif key == "\x1b[6~":
+                        self.current_block_idx = min(self.total_blocks - self.blocks_per_screen, self.current_block_idx + self.blocks_per_screen)
+                    elif key == "g":
+                        self.current_block_idx = 0
+                    elif key == "G":
+                        self.current_block_idx = max(0, self.total_blocks - self.blocks_per_screen)
+                    
+                    live.update(self._render_content())
+                    
+                except (KeyboardInterrupt, EOFError):
+                    break
+
 
 class DataViewer:
     """数据查看器 - 提供查询和展示重复文件数据的功能"""
@@ -738,68 +853,68 @@ def groups(
         hash_value=hash_value
     )
     
-    groups = result['groups']
+    groups_data = result['groups']
     total_count = result['total_count']
     
-    def render_output():
+    if hash_value:
+        title = f"哈希值 {hash_value[:16]}... 的重复文件组"
+    else:
+        title = "重复文件组列表"
+    
+    if not groups_data:
         console.print()
-        if hash_value:
-            console.print(f"[bold blue]📁 哈希值 {hash_value[:16]}... 的重复文件组[/bold blue]")
-        else:
-            console.print("[bold blue]📁 重复文件组列表[/bold blue]")
+        console.print(f"[bold blue]📁 {title}[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
-        
-        if total_count > 0:
-            total_savable = sum(group['savable_space'] for group in groups)
-            avg_file_count = sum(group['file_count'] for group in groups) / len(groups) if groups else 0
-            
-            console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组")
-            console.print()
-        
-        if not groups:
-            console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
+        console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
+        console.print()
+        return
+    
+    total_savable = sum(group['savable_space'] for group in groups_data)
+    avg_file_count = sum(group['file_count'] for group in groups_data) / len(groups_data) if groups_data else 0
+    
+    stats_line = f"[bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组"
+    
+    blocks = []
+    for group in groups_data:
+        if group['hash']:
+            hash_status = "✅"
         else:
-            separator = "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]"
-            
-            for i, group in enumerate(groups):
-                console.print(separator)
-                
-                if group['hash']:
-                    hash_status = "✅"
-                else:
-                    hash_status = "⏳"
-                
-                ext_display = group['extension'] or "(无)"
-                
-                console.print(f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}")
-                
-                for filepath in group['files'][:3]:
-                    console.print(f"     [dim]{filepath}[/dim]")
-                
-                if len(group['files']) > 3:
-                    console.print(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
-            
-            console.print(separator)
-            console.print()
+            hash_status = "⏳"
         
-        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-        console.print()
-        console.print("  [bold]提示:[/bold]")
-        console.print("    --sort size/count/path/ext/hash 切换排序方式")
-        console.print("    --min-size/--max-size 按大小过滤")
-        console.print("    --extension 按扩展名过滤")
-        console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
-        console.print("    --hash 按哈希值过滤")
-        console.print("    --detail <组ID> 查看详细信息")
-        console.print("    --no-pager 禁用分页器")
-        console.print()
+        ext_display = group['extension'] or "(无)"
+        
+        block_lines = [
+            "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]",
+            f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}"
+        ]
+        
+        for filepath in group['files'][:3]:
+            block_lines.append(f"     [dim]{filepath}[/dim]")
+        
+        if len(group['files']) > 3:
+            block_lines.append(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
+        
+        blocks.append("\n".join(block_lines))
     
     if pager:
-        with console.pager(styles=True):
-            render_output()
+        block_pager = BlockPager(blocks, console=console, title=title)
+        block_pager.run()
     else:
-        render_output()
+        console.print()
+        console.print(f"[bold blue]📁 {title}[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print(f"  {stats_line}")
+        console.print()
+        
+        for block in blocks:
+            console.print(block)
+        
+        console.print("[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]")
+        console.print()
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
 
 @app.command()
 def files(

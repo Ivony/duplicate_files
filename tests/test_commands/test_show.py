@@ -7,7 +7,7 @@ from commands.show import app
 class TestShowCommand:
     def test_groups_command(self, capsys):
         """测试show groups命令"""
-        sys.argv = ['', 'groups']
+        sys.argv = ['', 'groups', '--no-pager']
         with pytest.raises(SystemExit):
             app()
         
@@ -16,7 +16,7 @@ class TestShowCommand:
     
     def test_groups_hash_filter(self, capsys):
         """测试show groups --hash参数"""
-        sys.argv = ['', 'groups', '--hash', 'abc123']
+        sys.argv = ['', 'groups', '--hash', 'abc123', '--no-pager']
         with pytest.raises(SystemExit):
             app()
         
@@ -29,7 +29,7 @@ class TestShowCommand:
         with open(test_file, 'w') as f:
             f.write('test content')
         
-        sys.argv = ['', 'files', temp_dir]
+        sys.argv = ['', 'files', temp_dir, '--no-pager']
         with pytest.raises(SystemExit):
             app()
         
