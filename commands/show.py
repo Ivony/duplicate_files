@@ -795,7 +795,6 @@ def files(
     pattern: str,
     all: bool = False,
     hash: bool = False,
-    limit: int = 100,
     pager: bool = True
 ):
     """[bold]查询文件，支持路径或模式[/bold]
@@ -859,7 +858,7 @@ def files(
             else:
                 console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个匹配的重复文件组")
                 console.print()
-                for i, group in enumerate(groups[:limit], 1):
+                for i, group in enumerate(groups, 1):
                     console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
                     console.print(f"    文件大小      {format_size_colored(group['size'])}")
                     console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
@@ -869,10 +868,6 @@ def files(
                         console.print(f"      [dim]{j}.[/dim] {filepath}")
                     if len(group['matched_files']) > 5:
                         console.print(f"      [dim]... 还有 {len(group['matched_files']) - 5} 个匹配文件[/dim]")
-                    console.print()
-                
-                if len(groups) > limit:
-                    console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
                     console.print()
                 
                 if unhashed_count > 0:
@@ -895,9 +890,8 @@ def files(
                     LEFT JOIN file_hash fh ON f.Filename = fh.Filepath
                     WHERE LOWER(REPLACE(f.Filename, '\\\\', '/')) LIKE ?
                     ORDER BY f.Filename
-                    LIMIT ?
                 '''
-                cursor.execute(query, (f"{normalized_pattern}%", limit))
+                cursor.execute(query, (f"{normalized_pattern}%",))
                 files = cursor.fetchall()
                 conn.close()
                 
@@ -918,9 +912,6 @@ def files(
                             if created_at:
                                 console.print(f"    计算时间: [dim]{created_at}[/dim]")
                         console.print()
-                
-                if len(files) >= limit:
-                    console.print(f"  [dim]... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）[/dim]")
                 
                 console.print()
                 console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
@@ -948,7 +939,7 @@ def files(
                 else:
                     console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个重复文件组")
                     console.print()
-                    for i, group in enumerate(groups[:limit], 1):
+                    for i, group in enumerate(groups, 1):
                         console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
                         console.print(f"    文件大小      {format_size_colored(group['size'])}")
                         console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
@@ -958,10 +949,6 @@ def files(
                             console.print(f"      [dim]{j}.[/dim] {filepath}")
                         if len(group['files']) > 5:
                             console.print(f"      [dim]... 还有 {len(group['files']) - 5} 个文件[/dim]")
-                        console.print()
-                    
-                    if len(groups) > limit:
-                        console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
                         console.print()
                     
                     if unhashed_count > 0:
