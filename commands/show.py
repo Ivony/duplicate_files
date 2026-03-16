@@ -79,7 +79,8 @@ class BlockPager:
         block_provider: Callable[[int, int], List[str]],
         console: Console = None,
         title: str = "数据列表",
-        page_size: int = 20
+        page_size: int = 20,
+        sort_mode: str = "size"
     ):
         """
         初始化块级分页器
@@ -90,12 +91,14 @@ class BlockPager:
             console: Rich Console实例
             title: 标题
             page_size: 每页预加载的块数
+            sort_mode: 排序模式
         """
         self.total_blocks = total_count
         self.block_provider = block_provider
         self.console = console or Console(emoji=True)
         self.title = title
         self.page_size = page_size
+        self.sort_mode = sort_mode
         self.current_block_idx = 0
         self.blocks_per_screen = 1
         self.cached_blocks = {}
@@ -105,7 +108,7 @@ class BlockPager:
     def _calculate_screen_capacity(self):
         """计算屏幕容量"""
         terminal_height = shutil.get_terminal_size().lines
-        reserved_lines = 5
+        reserved_lines = 4
         available_height = terminal_height - reserved_lines
         estimated_block_height = 5
         self.blocks_per_screen = max(1, available_height // estimated_block_height)
@@ -149,6 +152,17 @@ class BlockPager:
                 blocks.append(block)
         return blocks
     
+    def _get_sort_display(self) -> str:
+        """获取排序模式的显示文本"""
+        sort_names = {
+            "size": "大小",
+            "count": "数量",
+            "path": "路径",
+            "ext": "扩展名",
+            "hash": "哈希值"
+        }
+        return sort_names.get(self.sort_mode, self.sort_mode)
+    
     def _render_content(self) -> str:
         """渲染当前内容（全屏显示，无外框）"""
         visible_blocks = self._get_visible_blocks()
@@ -161,10 +175,8 @@ class BlockPager:
         
         lines = []
         
-        lines.append(f"[bold cyan]{self.title}[/bold cyan]")
+        lines.append(f"[bold cyan]{self.title}[/bold cyan] | [bold]总数:[/bold] [green]{self.total_blocks:,}[/green] | [bold]当前:[/bold] {start_idx + 1}-{end_idx} | [bold]排序:[/bold] {self._get_sort_display()}")
         lines.append(f"[dim]{separator}[/dim]")
-        lines.append(f"[bold]总数:[/bold] [green]{self.total_blocks:,}[/green] | [bold]当前:[/bold] {start_idx + 1}-{end_idx}")
-        lines.append("")
         
         for block in visible_blocks:
             lines.append(block)
@@ -1204,7 +1216,8 @@ def groups(
             block_provider=block_provider,
             console=console,
             title=title,
-            page_size=20
+            page_size=20,
+            sort_mode=sort
         )
         block_pager.run()
     else:
