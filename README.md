@@ -73,9 +73,6 @@ python main.py show groups
 # 查看所有组，包括未计算哈希值的组
 python main.py show groups --unconfirmed
 
-# 查看更多组
-python main.py show groups --page 1 --page-size 30
-
 # 按文件数量排序
 python main.py show groups --sort count
 ```
@@ -119,14 +116,14 @@ python main.py show groups --detail <组ID>
 确认无误后，可以进行清理操作：
 
 ```bash
-# 模拟运行（推荐先执行）
-python main.py clean clean --dryrun --keep-newest
+# 生成清理脚本（推荐方式）
+python main.py clean delete --yes --mode script --script cleanup.bat
 
-# 生成清理脚本（安全方式）
-python main.py clean script cleanup.bat
+# 汇总确认后执行
+python main.py clean delete --yes --mode summary
 
-# 执行清理（谨慎操作）
-python main.py clean clean --keep-newest
+# 人工选择保留文件
+python main.py clean delete
 ```
 
 ## ⚠️ 重要安全提示
@@ -151,7 +148,7 @@ python main.py clean clean --keep-newest
 - [ ] 已查看重复文件组列表
 - [ ] **已计算所有目标组的哈希值**
 - [ ] 已验证哈希值状态为"已确认"
-- [ ] 已使用 `--dryrun` 模拟运行
+- [ ] 已生成清理脚本并检查
 - [ ] 已备份重要数据
 
 ## 命令列表
@@ -166,14 +163,16 @@ python main.py clean clean --keep-newest
 - `groups` - 显示重复文件组列表（默认只显示已确认哈希值的组）
   - `--unconfirmed` - 显示所有组，包括未计算哈希值的组
   - `--sort size/count/path/ext/hash` - 排序方式
-  - `--page N` - 页码
-  - `--page-size N` - 每页数量
   - `--disk C:` - 按磁盘过滤
-  - `--min-size 100MB` - 最小文件大小
+  - `--min-size 100MB` / `--max-size 1GB` - 文件大小范围
   - `--extension .mp4` - 按扩展名过滤
+  - `--hash <value>` - 按哈希值过滤
   - `--detail <ID>` - 查看详细信息
+  - `--no-pager` - 禁用分页器
 - `files <pattern|path>` - 查询文件（支持路径或模式）
-- `hash <hash>` - 显示指定哈希值的所有文件
+  - `--all` - 显示所有文件，包括未计算哈希值的
+  - `--hash` - 显示哈希值信息
+  - `--no-pager` - 禁用分页器
 - `stats` - 显示统计分析
 
 ### 🔐 hash - 哈希计算
@@ -208,11 +207,18 @@ python main.py clean clean --keep-newest
 - `init` - 重建数据库
 
 ### 🧹 clean - 清理
-- `clean` - 清理重复文件（仅限已确认哈希值的组）
-  - `--dryrun` - 模拟运行，不实际删除
-  - `--keep-newest` - 保留最新文件
-  - `--keep-path <path>` - 保留指定路径的文件
-- `script <path>` - 生成清理脚本
+- `delete` - 删除重复文件（仅限已确认哈希值的组）
+  - `--yes/-y` - 自动选择保留文件，无需人工确认
+  - `--mode immediate/script/summary` - 执行模式
+  - `--strategy <策略>` - 排序策略（newest/oldest/longest-name等）
+  - `--script <path>` - 脚本输出路径（--mode script 时使用）
+  - `--group <IDs>` - 只处理指定组
+  - `--min-size/--max-size` - 文件大小范围
+  - `--extension <ext>` - 扩展名过滤
+  - `--disk <disk>` - 磁盘过滤
+- `link` - 删除重复文件并创建软链接
+  - 参数与 delete 相同
+- `interactive` - 进入交互式命令行界面（待实现）
 
 ## 使用示例
 
@@ -223,7 +229,7 @@ python main.py clean clean --keep-newest
 python main.py index scan D:\Downloads
 
 # 步骤 2: 查看重复文件组
-python main.py show groups --top 20
+python main.py show groups
 
 # 步骤 3: 计算哈希值（重要！）
 python main.py hash calc
@@ -231,11 +237,8 @@ python main.py hash calc
 # 步骤 4: 验证结果
 python main.py show groups
 
-# 步骤 5: 模拟清理
-python main.py clean clean --dryrun --keep-newest
-
-# 步骤 6: 执行清理
-python main.py clean clean --keep-newest
+# 步骤 5: 安全清理
+python main.py clean delete --yes --mode script --script cleanup.bat
 ```
 
 ### 2. 高级查询
@@ -250,8 +253,11 @@ python main.py show groups --min-size 100MB
 # 查看特定扩展名的重复文件
 python main.py show groups --extension .mp4
 
-# 分页查看
-python main.py show groups --page 2 --page-size 10
+# 按哈希值查找
+python main.py show groups --hash abc123def456
+
+# 查看详细信息
+python main.py show groups --detail 123
 ```
 
 ### 3. 按需计算哈希
@@ -283,14 +289,27 @@ python main.py export report report.txt
 ### 5. 安全清理
 
 ```bash
-# 模拟运行（推荐先执行）
-python main.py clean clean --dryrun --keep-newest
+# 自动选择 + 生成脚本（推荐）
+python main.py clean delete --yes --mode script --script cleanup.bat
 
-# 生成清理脚本（安全方式）
-python main.py clean script cleanup.bat
+# 自动选择 + 汇总确认
+python main.py clean delete --yes --mode summary
 
-# 执行清理（谨慎操作）
-python main.py clean clean --keep-newest
+# 人工选择 + 立即执行
+python main.py clean delete
+
+# 按策略选择（保留最新文件）
+python main.py clean delete --yes --strategy newest
+
+# 带过滤条件
+python main.py clean delete --yes --min-size 100MB --extension .mp4
+```
+
+### 6. 创建软链接
+
+```bash
+# 删除重复文件并创建软链接
+python main.py clean link --yes --mode script --script links.bat
 ```
 
 ## AI 编码历程
@@ -376,8 +395,8 @@ duplicate_files/
 
 - **始终先计算哈希值再清理**
 - 定期备份数据库：`db backup backup.db`
-- 使用 `--dryrun` 模拟清理操作
-- 生成清理脚本而不是直接删除
+- 使用 `--mode script` 生成脚本，检查后再执行
+- 使用 `--mode summary` 汇总确认后再执行
 
 ## 常见问题
 
@@ -394,7 +413,7 @@ A: 取决于文件大小和数量。大文件计算较慢，建议使用 `--mode
 A: 使用 `show groups` 命令，哈希状态列会显示"✅ 已确认"或"⏳ 未确认"。
 
 ### Q: 清理操作是否可逆？
-A: 文件删除是不可逆的！建议使用 `--dryrun` 模拟运行，或生成清理脚本手动执行。
+A: 文件删除是不可逆的！建议使用 `--mode script` 生成脚本，检查后再执行，或使用 `--mode summary` 汇总确认。
 
 ## 贡献
 
