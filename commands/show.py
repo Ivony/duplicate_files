@@ -695,7 +695,7 @@ def groups(
     
     [dim]排序选项: size (大小), count (数量), path (路径), ext (扩展名), hash (哈希值)[/dim]
     """
-    console = Console()
+    console = Console(emoji=True)
     hash_only = not unconfirmed
     hash_value = hash
     
@@ -812,7 +812,7 @@ def files(
     
     [dim]搜索重复文件组或已索引的文件[/dim]
     """
-    console = Console()
+    console = Console(emoji=True)
     show_all = all
     show_hash = hash
     
@@ -986,7 +986,7 @@ def stats(
     
     [dim]显示文件、重复组和类型分析的统计信息[/dim]
     """
-    console = Console()
+    console = Console(emoji=True)
     
     def format_size(size):
         if size >= 1073741824:
@@ -1156,7 +1156,7 @@ def _parse_size(size_str: str) -> int:
 
 def _show_group_detail(group_id: int):
     """显示指定组的详细信息"""
-    console = Console()
+    console = Console(emoji=True)
     group = analyzer.get_group_details(group_id)
 
     if not group:
