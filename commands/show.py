@@ -1,8 +1,11 @@
 import typer
 import sqlite3
 import os
+import sys
 import shutil
-from typing import Optional, List
+import threading
+import queue
+from typing import Optional, List, Callable
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -12,58 +15,139 @@ from rich.text import Text
 from commands.db import get_db_path
 
 
+def _get_key_non_blocking(timeout: float = 0.1) -> Optional[str]:
+    """非阻塞获取按键（跨平台）"""
+    if sys.platform == 'win32':
+        import msvcrt
+        if msvcrt.kbhit():
+            ch = msvcrt.getch()
+            if ch == b'\x03':
+                raise KeyboardInterrupt
+            elif ch == b'\xe0':
+                ch2 = msvcrt.getch()
+                if ch2 == b'H':
+                    return '\x1b[A'
+                elif ch2 == b'P':
+                    return '\x1b[B'
+                elif ch2 == b'I':
+                    return '\x1b[5~'
+                elif ch2 == b'Q':
+                    return '\x1b[6~'
+            return ch.decode('utf-8', errors='ignore')
+        return None
+    else:
+        import select
+        import tty
+        import termios
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            if select.select([sys.stdin], [], [], timeout)[0]:
+                ch = sys.stdin.read(1)
+                if ch == '\x03':
+                    raise KeyboardInterrupt
+                elif ch == '\x1b':
+                    import time
+                    time.sleep(0.01)
+                    if select.select([sys.stdin], [], [], 0.01)[0]:
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == '[':
+                            if select.select([sys.stdin], [], [], 0.01)[0]:
+                                ch3 = sys.stdin.read(1)
+                                if ch3 == 'A':
+                                    return '\x1b[A'
+                                elif ch3 == 'B':
+                                    return '\x1b[B'
+                                elif ch3 == '5':
+                                    sys.stdin.read(1)
+                                    return '\x1b[5~'
+                                elif ch3 == '6':
+                                    sys.stdin.read(1)
+                                    return '\x1b[6~'
+                return ch
+            return None
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+
 class BlockPager:
-    """块级分页器 - 使用Rich Live实现多行文本块分页显示"""
+    """块级分页器 - 使用Rich Live实现多行文本块分页显示，支持增量加载"""
     
-    def __init__(self, blocks: List[str], console: Console = None, title: str = "数据列表"):
+    def __init__(
+        self,
+        total_count: int,
+        block_provider: Callable[[int, int], List[str]],
+        console: Console = None,
+        title: str = "数据列表",
+        page_size: int = 20
+    ):
         """
         初始化块级分页器
         
         Args:
-            blocks: 文本块列表，每个元素是一个完整的多行文本块
+            total_count: 总数据块数
+            block_provider: 数据提供函数，参数为(start_idx, count)，返回文本块列表
             console: Rich Console实例
             title: 标题
+            page_size: 每页预加载的块数
         """
-        self.blocks = blocks
+        self.total_blocks = total_count
+        self.block_provider = block_provider
         self.console = console or Console(emoji=True)
         self.title = title
-        self.total_blocks = len(blocks)
+        self.page_size = page_size
         self.current_block_idx = 0
         self.blocks_per_screen = 1
-        self.block_heights = []
+        self.cached_blocks = {}
+        self.current_page = -1
         self._calculate_screen_capacity()
     
     def _calculate_screen_capacity(self):
-        """计算屏幕容量和每个块的高度"""
+        """计算屏幕容量"""
         terminal_height = shutil.get_terminal_size().lines
         reserved_lines = 8
         available_height = terminal_height - reserved_lines
-        
-        self.block_heights = []
-        for block in self.blocks:
-            lines = block.count('\n') + 1
-            self.block_heights.append(lines)
-        
-        if not self.block_heights:
-            self.blocks_per_screen = 1
+        estimated_block_height = 6
+        self.blocks_per_screen = max(1, available_height // estimated_block_height)
+    
+    def _load_page(self, page: int):
+        """加载指定页的数据"""
+        if page == self.current_page:
             return
         
-        total_height = 0
-        count = 0
-        for height in self.block_heights:
-            if total_height + height <= available_height:
-                total_height += height
-                count += 1
-            else:
-                break
+        start_idx = page * self.page_size
+        if start_idx >= self.total_blocks:
+            return
         
-        self.blocks_per_screen = max(1, count)
+        end_idx = min(start_idx + self.page_size, self.total_blocks)
+        
+        try:
+            blocks = self.block_provider(start_idx, end_idx - start_idx)
+            for i, block in enumerate(blocks):
+                self.cached_blocks[start_idx + i] = block
+            self.current_page = page
+        except Exception as e:
+            self.console.print(f"[red]加载数据失败: {e}[/red]")
+    
+    def _get_block(self, idx: int) -> Optional[str]:
+        """获取指定索引的块"""
+        if idx < 0 or idx >= self.total_blocks:
+            return None
+        
+        if idx not in self.cached_blocks:
+            page = idx // self.page_size
+            self._load_page(page)
+        
+        return self.cached_blocks.get(idx)
     
     def _get_visible_blocks(self) -> List[str]:
         """获取当前可见的文本块"""
-        start = self.current_block_idx
-        end = min(start + self.blocks_per_screen, self.total_blocks)
-        return self.blocks[start:end]
+        blocks = []
+        for i in range(self.current_block_idx, min(self.current_block_idx + self.blocks_per_screen, self.total_blocks)):
+            block = self._get_block(i)
+            if block:
+                blocks.append(block)
+        return blocks
     
     def _render_content(self) -> Panel:
         """渲染当前内容"""
@@ -83,23 +167,30 @@ class BlockPager:
             content.append(block)
         
         if not visible_blocks:
-            content.append("没有数据", style="dim")
+            content.append("加载中...", style="dim")
         
-        footer = "\n\n[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | q 退出[/dim]"
+        footer = "\n\n[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | g/G 首尾 | q 退出[/dim]"
         content.append(footer)
         
         return Panel(content, title=f"[bold]{self.title}[/bold]", border_style="blue")
     
     def run(self):
         """启动交互式分页显示"""
-        if not self.blocks:
+        if self.total_blocks == 0:
             self.console.print(Panel("没有数据", title=f"[bold]{self.title}[/bold]", border_style="blue"))
             return
         
-        with Live(self._render_content(), console=self.console, refresh_per_second=4) as live:
+        self._load_page(0)
+        
+        import time
+        
+        with Live(self._render_content(), console=self.console, refresh_per_second=10) as live:
             while True:
                 try:
-                    key = self.console.input("", password=True)
+                    key = _get_key_non_blocking(timeout=0.1)
+                    
+                    if key is None:
+                        continue
                     
                     if key == "q" or key == "Q":
                         break
@@ -469,6 +560,208 @@ class DataViewer:
             'page_size': page_size,
             'total_pages': (total_count + page_size - 1) // page_size
         }
+    
+    def get_groups_count(self, hash_only=True, min_size=None, max_size=None, extension=None, disk=None, hash_value=None):
+        """快速获取重复文件组总数
+        
+        Args:
+            hash_only: 是否只返回已确认哈希值的组
+            min_size: 最小文件大小（字节）
+            max_size: 最大文件大小（字节）
+            extension: 文件扩展名过滤
+            disk: 按磁盘过滤
+            hash_value: 按哈希值过滤
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        
+        if hash_only:
+            conditions.append("dg.Hash IS NOT NULL AND dg.Hash != ''")
+        
+        if min_size is not None:
+            conditions.append("dg.Size >= ?")
+            params.append(min_size)
+        
+        if max_size is not None:
+            conditions.append("dg.Size <= ?")
+            params.append(max_size)
+        
+        if extension is not None:
+            conditions.append("dg.Extension = ?")
+            params.append(extension)
+        
+        if self.path_limit:
+            conditions.append("f.Filename LIKE ?")
+            params.append(f"{self.path_limit}%")
+        
+        if disk:
+            conditions.append("UPPER(SUBSTR(f.Filename, 1, 2)) = ?")
+            params.append(disk.upper())
+        
+        if hash_value:
+            conditions.append("dg.Hash LIKE ?")
+            params.append(f"{hash_value}%")
+        
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        
+        if self.path_limit:
+            count_query = f'''
+            SELECT COUNT(DISTINCT dg.ID)
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            INNER JOIN files f ON df.Filepath = f.Filename
+            {where_clause}
+            '''
+        else:
+            count_query = f'''
+            SELECT COUNT(DISTINCT dg.ID)
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            {where_clause}
+            '''
+        
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+        conn.close()
+        
+        return total_count
+    
+    def get_groups_batch(self, start_idx=0, count=20, hash_only=True, min_size=None, max_size=None, extension=None, sort_by='size', disk=None, hash_value=None):
+        """按需获取重复文件组数据块
+        
+        Args:
+            start_idx: 起始索引
+            count: 获取数量
+            hash_only: 是否只返回已确认哈希值的组
+            min_size: 最小文件大小（字节）
+            max_size: 最大文件大小（字节）
+            extension: 文件扩展名过滤
+            sort_by: 排序方式
+            disk: 按磁盘过滤
+            hash_value: 按哈希值过滤
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        
+        if hash_only:
+            conditions.append("dg.Hash IS NOT NULL AND dg.Hash != ''")
+        
+        if min_size is not None:
+            conditions.append("dg.Size >= ?")
+            params.append(min_size)
+        
+        if max_size is not None:
+            conditions.append("dg.Size <= ?")
+            params.append(max_size)
+        
+        if extension is not None:
+            conditions.append("dg.Extension = ?")
+            params.append(extension)
+        
+        if self.path_limit:
+            conditions.append("f.Filename LIKE ?")
+            params.append(f"{self.path_limit}%")
+        
+        if disk:
+            conditions.append("UPPER(SUBSTR(f.Filename, 1, 2)) = ?")
+            params.append(disk.upper())
+        
+        if hash_value:
+            conditions.append("dg.Hash LIKE ?")
+            params.append(f"{hash_value}%")
+        
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        
+        if sort_by == 'size':
+            order_by = "ORDER BY (COUNT(*) - 1) * dg.Size DESC"
+        elif sort_by == 'count':
+            order_by = "ORDER BY COUNT(*) DESC"
+        elif sort_by == 'path':
+            order_by = "ORDER BY MIN(f.Filename)"
+        elif sort_by == 'ext':
+            order_by = "ORDER BY dg.Extension, (COUNT(*) - 1) * dg.Size DESC"
+        elif sort_by == 'hash':
+            order_by = "ORDER BY dg.Hash"
+        else:
+            order_by = "ORDER BY (COUNT(*) - 1) * dg.Size DESC"
+        
+        if self.path_limit:
+            query = f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            INNER JOIN files f ON df.Filepath = f.Filename
+            {where_clause}
+            GROUP BY dg.ID
+            {order_by}
+            LIMIT ? OFFSET ?
+            '''
+        else:
+            query = f'''
+            SELECT dg.ID, dg.Size, dg.Extension, COUNT(*) as file_count, dg.Hash
+            FROM duplicate_groups dg
+            INNER JOIN duplicate_files df ON dg.ID = df.Group_ID
+            {where_clause}
+            GROUP BY dg.ID
+            {order_by}
+            LIMIT ? OFFSET ?
+            '''
+        
+        params.extend([count, start_idx])
+        cursor.execute(query, params)
+        groups = cursor.fetchall()
+        
+        result = []
+        for group_id, size, ext, file_count, hash_val in groups:
+            cursor.execute('''
+            SELECT f.Filename
+            FROM duplicate_files df
+            INNER JOIN files f ON df.Filepath = f.Filename
+            WHERE df.Group_ID = ?
+            ORDER BY f.Filename
+            LIMIT 3
+            ''', (group_id,))
+            files = [f[0] for f in cursor.fetchall()]
+            
+            truncated_files = []
+            for filepath in files:
+                if len(filepath) > 50:
+                    filename = os.path.basename(filepath)
+                    if len(filename) > 30:
+                        name_part, ext_part = os.path.splitext(filename)
+                        if ext_part:
+                            truncated_name = name_part[:27] + "..." + ext_part
+                        else:
+                            truncated_name = filename[:30] + "..."
+                        truncated_files.append(".../" + truncated_name)
+                    else:
+                        path_part = os.path.dirname(filepath)
+                        if len(path_part) > 20:
+                            truncated_path = "..." + path_part[-17:]
+                            truncated_files.append(truncated_path + "/" + filename)
+                        else:
+                            truncated_files.append(filepath)
+                else:
+                    truncated_files.append(filepath)
+            
+            result.append({
+                'group_id': group_id,
+                'size': size,
+                'extension': ext,
+                'file_count': file_count,
+                'savable_space': (file_count - 1) * size,
+                'hash': hash_val,
+                'files': truncated_files
+            })
+        
+        conn.close()
+        return result
     
     def get_group_details(self, group_id):
         """获取指定组的详细信息
@@ -841,27 +1134,21 @@ def groups(
         _show_group_detail(detail)
         return
     
-    result = analyzer.get_groups_list(
-        hash_only=hash_only,
-        min_size=parsed_min_size,
-        max_size=parsed_max_size,
-        extension=extension,
-        sort_by=sort,
-        page=1,
-        page_size=999999,
-        disk=disk,
-        hash_value=hash_value
-    )
-    
-    groups_data = result['groups']
-    total_count = result['total_count']
-    
     if hash_value:
         title = f"哈希值 {hash_value[:16]}... 的重复文件组"
     else:
         title = "重复文件组列表"
     
-    if not groups_data:
+    total_count = analyzer.get_groups_count(
+        hash_only=hash_only,
+        min_size=parsed_min_size,
+        max_size=parsed_max_size,
+        extension=extension,
+        disk=disk,
+        hash_value=hash_value
+    )
+    
+    if total_count == 0:
         console.print()
         console.print(f"[bold blue]📁 {title}[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
@@ -870,44 +1157,62 @@ def groups(
         console.print()
         return
     
-    total_savable = sum(group['savable_space'] for group in groups_data)
-    avg_file_count = sum(group['file_count'] for group in groups_data) / len(groups_data) if groups_data else 0
-    
-    stats_line = f"[bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组"
-    
-    blocks = []
-    for group in groups_data:
-        if group['hash']:
-            hash_status = "✅"
-        else:
-            hash_status = "⏳"
+    def block_provider(start_idx: int, count: int) -> List[str]:
+        """数据提供函数，按需获取数据块"""
+        groups_batch = analyzer.get_groups_batch(
+            start_idx=start_idx,
+            count=count,
+            hash_only=hash_only,
+            min_size=parsed_min_size,
+            max_size=parsed_max_size,
+            extension=extension,
+            sort_by=sort,
+            disk=disk,
+            hash_value=hash_value
+        )
         
-        ext_display = group['extension'] or "(无)"
+        blocks = []
+        for group in groups_batch:
+            if group['hash']:
+                hash_status = "✅"
+            else:
+                hash_status = "⏳"
+            
+            ext_display = group['extension'] or "(无)"
+            
+            block_lines = [
+                "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]",
+                f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}"
+            ]
+            
+            for filepath in group['files'][:3]:
+                block_lines.append(f"     [dim]{filepath}[/dim]")
+            
+            if len(group['files']) > 3:
+                block_lines.append(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
+            
+            blocks.append("\n".join(block_lines))
         
-        block_lines = [
-            "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]",
-            f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}"
-        ]
-        
-        for filepath in group['files'][:3]:
-            block_lines.append(f"     [dim]{filepath}[/dim]")
-        
-        if len(group['files']) > 3:
-            block_lines.append(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
-        
-        blocks.append("\n".join(block_lines))
+        return blocks
     
     if pager:
-        block_pager = BlockPager(blocks, console=console, title=title)
+        block_pager = BlockPager(
+            total_count=total_count,
+            block_provider=block_provider,
+            console=console,
+            title=title,
+            page_size=20
+        )
         block_pager.run()
     else:
         console.print()
         console.print(f"[bold blue]📁 {title}[/bold blue]")
         console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
-        console.print(f"  {stats_line}")
+        console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组")
         console.print()
         
+        blocks = block_provider(0, min(100, total_count))
         for block in blocks:
             console.print(block)
         
