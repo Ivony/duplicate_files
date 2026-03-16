@@ -676,8 +676,7 @@ class IndexManager:
 
 app = typer.Typer(
     name="index",
-    help="[bold blue]📁 索引管理[/bold blue]",
-    rich_markup_mode=True
+    help="📁 索引管理"
 )
 
 @app.command()

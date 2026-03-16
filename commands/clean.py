@@ -25,8 +25,7 @@ from commands.db import get_db_path
 
 app = typer.Typer(
     name="clean",
-    help="[bold red]🧹 清理重复文件[/bold red]",
-    rich_markup_mode=True
+    help="🧹 清理重复文件"
 )
 console = Console()
 
@@ -498,9 +497,9 @@ def delete_cmd(
     extension: Optional[str] = typer.Option(None, "--extension", "-e", help="扩展名过滤"),
     disk: Optional[str] = typer.Option(None, "--disk", "-d", help="磁盘过滤")
 ):
-    """[bold]删除重复文件[/bold]
+    """删除重复文件
     
-    [dim]删除重复文件，只保留每组中的一个文件[/dim]
+    删除重复文件，只保留每组中的一个文件
     """
     if strategy not in SORT_STRATEGIES:
         console.print(f"[red]错误: 无效的排序策略 '{strategy}'[/red]")
@@ -544,9 +543,9 @@ def link_cmd(
     extension: Optional[str] = typer.Option(None, "--extension", "-e", help="扩展名过滤"),
     disk: Optional[str] = typer.Option(None, "--disk", "-d", help="磁盘过滤")
 ):
-    """[bold]创建软链接替换重复文件[/bold]
+    """创建软链接替换重复文件
     
-    [dim]删除重复文件并创建软链接指向保留文件[/dim]
+    删除重复文件并创建软链接指向保留文件
     """
     if strategy not in SORT_STRATEGIES:
         console.print(f"[red]错误: 无效的排序策略 '{strategy}'[/red]")

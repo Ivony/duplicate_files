@@ -38,8 +38,7 @@ MOVE_UP = "\033[1A"
 
 app = typer.Typer(
     name="hash",
-    help="[bold blue]🔐 哈希计算[/bold blue]",
-    rich_markup_mode=True
+    help="🔐 哈希计算"
 )
 
 class HashCalculator:

@@ -20,8 +20,7 @@ from commands import index, show, hash, export, clean, config, db
 
 app = typer.Typer(
     name="duplicate",
-    help="[bold blue]🔍 重复文件查找工具[/bold blue]",
-    rich_markup_mode=True
+    help="🔍 重复文件查找工具"
 )
 
 app.add_typer(index.app, name="index")
@@ -359,7 +358,8 @@ def interactive_mode():
                 break
             
             # 处理帮助命令
-            if user_input.strip().lower() == 'help':
+            user_input_lower = user_input.strip().lower()
+            if user_input_lower == 'help':
                 console.print("[bold blue]可用命令:[/bold blue]")
                 console.print("  index    - 索引管理")
                 console.print("  show     - 显示信息")
@@ -369,7 +369,19 @@ def interactive_mode():
                 console.print("  config   - 配置管理")
                 console.print("  db       - 数据库管理")
                 console.print("  exit     - 退出程序")
+                console.print("\n[dim]提示: 使用 'help <command>' 查看子命令帮助，如 'help clean'[/dim]")
                 continue
+            
+            # 处理 help <command> 格式
+            if user_input_lower.startswith('help '):
+                command = user_input_lower[5:].strip()
+                if command:
+                    sys.argv = ['duplicate', command, '--help']
+                    try:
+                        app()
+                    except SystemExit:
+                        pass
+                    continue
             
             # 处理空输入
             if not user_input.strip():

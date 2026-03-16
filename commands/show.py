@@ -669,8 +669,7 @@ class DataViewer:
 
 app = typer.Typer(
     name="show",
-    help="[bold blue]📊 显示信息[/bold blue]",
-    rich_markup_mode=True
+    help="📊 显示信息"
 )
 analyzer = DataViewer()
 
