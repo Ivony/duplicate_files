@@ -758,42 +758,29 @@ def groups(
     if not groups:
         console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
     else:
-        # 创建表格
-        table = Table(show_header=True, header_style="bold blue", border_style="dim")
-        table.add_column("组ID", width=8, style="cyan")
-        table.add_column("大小", width=12, style="bold")
-        table.add_column("扩展名", width=10)
-        table.add_column("文件数", width=8, justify="center")
-        table.add_column("可释放空间", width=15)
-        table.add_column("哈希状态", width=12)
-        table.add_column("示例文件", width=50)
+        separator = "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]"
         
-        for group in groups:
-            # 格式化哈希状态
+        for i, group in enumerate(groups):
+            console.print(separator)
+            
             if group['hash']:
-                hash_status = "✅ 已确认"
+                hash_status = "✅"
             else:
-                hash_status = "⏳ 未确认"
+                hash_status = "⏳"
             
-            # 格式化文件预览
-            files_preview = "\n".join(group['files'][:3])
+            ext_display = group['extension'] or "(无)"
+            
+            console.print(f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}")
+            
+            for filepath in group['files'][:3]:
+                console.print(f"     [dim]{filepath}[/dim]")
+            
             if len(group['files']) > 3:
-                files_preview += f"\n... 还有 {len(group['files']) - 3} 个文件"
-            
-            table.add_row(
-                str(group['group_id']),
-                format_size_colored(group['size']),
-                group['extension'] or "(无)",
-                str(group['file_count']),
-                format_size_colored(group['savable_space']),
-                hash_status,
-                files_preview
-            )
+                console.print(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
         
-        console.print(table)
+        console.print(separator)
         console.print()
         
-        # 显示分页导航
         if total_pages > 1:
             console.print("  [bold]分页导航:[/bold]")
             console.print(f"    使用 --page 1-{total_pages} 切换页码")
