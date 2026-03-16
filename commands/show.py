@@ -105,9 +105,9 @@ class BlockPager:
     def _calculate_screen_capacity(self):
         """计算屏幕容量"""
         terminal_height = shutil.get_terminal_size().lines
-        reserved_lines = 8
+        reserved_lines = 5
         available_height = terminal_height - reserved_lines
-        estimated_block_height = 6
+        estimated_block_height = 5
         self.blocks_per_screen = max(1, available_height // estimated_block_height)
     
     def _load_page(self, page: int):
@@ -127,7 +127,7 @@ class BlockPager:
                 self.cached_blocks[start_idx + i] = block
             self.current_page = page
         except Exception as e:
-            self.console.print(f"[red]加载数据失败: {e}[/red]")
+            pass
     
     def _get_block(self, idx: int) -> Optional[str]:
         """获取指定索引的块"""
@@ -149,42 +149,45 @@ class BlockPager:
                 blocks.append(block)
         return blocks
     
-    def _render_content(self) -> Panel:
-        """渲染当前内容"""
+    def _render_content(self) -> str:
+        """渲染当前内容（全屏显示，无外框）"""
         visible_blocks = self._get_visible_blocks()
-        
-        content = Text()
         
         start_idx = self.current_block_idx
         end_idx = start_idx + len(visible_blocks)
         
-        header = f"总数: {self.total_blocks} | 当前: {start_idx + 1}-{end_idx}"
-        content.append(header + "\n\n", style="bold cyan")
+        terminal_width = shutil.get_terminal_size().columns
+        separator = "─" * (terminal_width - 2)
         
-        for i, block in enumerate(visible_blocks):
-            if i > 0:
-                content.append("\n")
-            content.append(block)
+        lines = []
+        
+        lines.append(f"[bold cyan]{self.title}[/bold cyan]")
+        lines.append(f"[dim]{separator}[/dim]")
+        lines.append(f"[bold]总数:[/bold] [green]{self.total_blocks:,}[/green] | [bold]当前:[/bold] {start_idx + 1}-{end_idx}")
+        lines.append("")
+        
+        for block in visible_blocks:
+            lines.append(block)
         
         if not visible_blocks:
-            content.append("加载中...", style="dim")
+            lines.append("[dim]加载中...[/dim]")
         
-        footer = "\n\n[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | g/G 首尾 | q 退出[/dim]"
-        content.append(footer)
+        lines.append("")
+        lines.append(f"[dim]{separator}[/dim]")
+        lines.append("[dim]↑/↓ 上下翻块 | PageUp/PageDown 整屏翻页 | g/G 首尾 | q 退出[/dim]")
         
-        return Panel(content, title=f"[bold]{self.title}[/bold]", border_style="blue")
+        return "\n".join(lines)
     
     def run(self):
         """启动交互式分页显示"""
         if self.total_blocks == 0:
-            self.console.print(Panel("没有数据", title=f"[bold]{self.title}[/bold]", border_style="blue"))
+            self.console.print(f"\n[bold cyan]{self.title}[/bold cyan]")
+            self.console.print("[dim]没有数据[/dim]\n")
             return
         
         self._load_page(0)
         
-        import time
-        
-        with Live(self._render_content(), console=self.console, refresh_per_second=10) as live:
+        with Live(self._render_content(), console=self.console, refresh_per_second=10, screen=True) as live:
             while True:
                 try:
                     key = _get_key_non_blocking(timeout=0.1)
