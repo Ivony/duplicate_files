@@ -686,7 +686,7 @@ def groups(
     sort: str = "size",
     detail: Optional[int] = None,
     disk: Optional[str] = None,
-    hash_value: Optional[str] = None,
+    hash: Optional[str] = None,
     pager: bool = True
 ):
     """[bold]显示重复文件组列表[/bold]
@@ -697,6 +697,7 @@ def groups(
     """
     console = Console()
     hash_only = not unconfirmed
+    hash_value = hash
     
     def format_size(size):
         if size >= 1073741824:

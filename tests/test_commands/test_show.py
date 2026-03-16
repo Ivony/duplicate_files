@@ -14,6 +14,15 @@ class TestShowCommand:
         captured = capsys.readouterr()
         assert '重复文件组' in captured.out
     
+    def test_groups_hash_filter(self, capsys):
+        """测试show groups --hash参数"""
+        sys.argv = ['', 'groups', '--hash', 'abc123']
+        with pytest.raises(SystemExit):
+            app()
+        
+        captured = capsys.readouterr()
+        assert '哈希值' in captured.out or '重复文件组' in captured.out
+    
     def test_files_command(self, temp_dir, capsys):
         """测试show files命令"""
         test_file = os.path.join(temp_dir, 'test.txt')
