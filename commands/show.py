@@ -684,7 +684,8 @@ def groups(
     detail: Optional[int] = None,
     page: int = 1,
     page_size: int = 20,
-    disk: Optional[str] = None
+    disk: Optional[str] = None,
+    pager: bool = True
 ):
     """[bold]显示重复文件组列表[/bold]
     
@@ -722,7 +723,6 @@ def groups(
         _show_group_detail(detail)
         return
     
-    # 获取组列表
     result = analyzer.get_groups_list(
         hash_only=hash_only,
         min_size=parsed_min_size,
@@ -740,70 +740,77 @@ def groups(
     current_page_size = result['page_size']
     total_pages = result['total_pages']
     
-    console.print()
-    console.print("[bold blue]📁 重复文件组列表[/bold blue]")
-    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-    console.print()
-    
-    # 显示统计信息
-    if total_count > 0:
-        # 计算总可释放空间和平均文件数
-        total_savable = sum(group['savable_space'] for group in groups)
-        avg_file_count = sum(group['file_count'] for group in groups) / len(groups) if groups else 0
-        
-        console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组")
-        console.print(f"  [bold]分页信息:[/bold] 第 [green]{current_page}[/green] / {total_pages} 页 | 每页显示 [green]{current_page_size}[/green] 个组")
+    def render_output():
         console.print()
-    
-    if not groups:
-        console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
-    else:
-        separator = "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]"
-        
-        for i, group in enumerate(groups):
-            console.print(separator)
-            
-            if group['hash']:
-                hash_status = "✅"
-            else:
-                hash_status = "⏳"
-            
-            ext_display = group['extension'] or "(无)"
-            
-            console.print(f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}")
-            
-            for filepath in group['files'][:3]:
-                console.print(f"     [dim]{filepath}[/dim]")
-            
-            if len(group['files']) > 3:
-                console.print(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
-        
-        console.print(separator)
+        console.print("[bold blue]📁 重复文件组列表[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
         console.print()
         
-        if total_pages > 1:
-            console.print("  [bold]分页导航:[/bold]")
-            console.print(f"    使用 --page 1-{total_pages} 切换页码")
-            console.print(f"    使用 --page-size N 设置每页显示数量")
+        if total_count > 0:
+            total_savable = sum(group['savable_space'] for group in groups)
+            avg_file_count = sum(group['file_count'] for group in groups) / len(groups) if groups else 0
+            
+            console.print(f"  [bold]统计信息:[/bold] 共 [green]{total_count:,}[/green] 个组 | 总可释放空间: {format_size_colored(total_savable)} | 平均文件数: [bold]{avg_file_count:.1f}[/bold] 个/组")
+            console.print(f"  [bold]分页信息:[/bold] 第 [green]{current_page}[/green] / {total_pages} 页 | 每页显示 [green]{current_page_size}[/green] 个组")
             console.print()
+        
+        if not groups:
+            console.print("  [dim]没有找到符合条件的重复文件组[/dim]")
+        else:
+            separator = "[dim]─────────────────────────────────────────────────────────────────────────────────────────────────[/dim]"
+            
+            for i, group in enumerate(groups):
+                console.print(separator)
+                
+                if group['hash']:
+                    hash_status = "✅"
+                else:
+                    hash_status = "⏳"
+                
+                ext_display = group['extension'] or "(无)"
+                
+                console.print(f"  📁 [bold cyan]组 #{group['group_id']}[/bold cyan] | {format_size_colored(group['size'])} | [dim]{ext_display}[/dim] | [bold]{group['file_count']}[/bold] 文件 | 可释放 {format_size_colored(group['savable_space'])} | {hash_status}")
+                
+                for filepath in group['files'][:3]:
+                    console.print(f"     [dim]{filepath}[/dim]")
+                
+                if len(group['files']) > 3:
+                    console.print(f"     [dim]... 还有 {len(group['files']) - 3} 个文件[/dim]")
+            
+            console.print(separator)
+            console.print()
+            
+            if total_pages > 1:
+                console.print("  [bold]分页导航:[/bold]")
+                console.print(f"    使用 --page 1-{total_pages} 切换页码")
+                console.print(f"    使用 --page-size N 设置每页显示数量")
+                console.print()
+        
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        console.print("  [bold]提示:[/bold]")
+        console.print("    --sort size/count/path/ext/hash 切换排序方式")
+        console.print("    --min-size/--max-size 按大小过滤")
+        console.print("    --extension 按扩展名过滤")
+        console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
+        console.print("    --page/--page-size 分页控制")
+        console.print("    --detail <组ID> 查看详细信息")
+        console.print("    --no-pager 禁用分页器")
+        console.print()
     
-    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-    console.print()
-    console.print("  [bold]提示:[/bold]")
-    console.print("    --sort size/count/path/ext/hash 切换排序方式")
-    console.print("    --min-size/--max-size 按大小过滤")
-    console.print("    --extension 按扩展名过滤")
-    console.print("    --disk 按磁盘过滤（如 C:, D: 等）")
-    console.print("    --page/--page-size 分页控制")
-    console.print("    --detail <组ID> 查看详细信息")
-    console.print()
+    if pager:
+        with console.pager(styles=True):
+            render_output()
+    else:
+        render_output()
 
 @app.command()
 def files(
     pattern: str,
     all: bool = False,
     hash: bool = False,
-    limit: int = 100
+    limit: int = 100,
+    pager: bool = True
 ):
     """[bold]查询文件，支持路径或模式[/bold]
     
@@ -842,128 +849,40 @@ def files(
         elif pattern.startswith('\\') or pattern.startswith('/'):
             is_full_path = True
     
-    if has_wildcard or not is_full_path:
-        hash_only = not show_all
-        groups = analyzer.filter_by_pattern(pattern, hash_only=hash_only)
-        
-        unhashed_count = 0
-        if not show_all:
-            all_groups = analyzer.filter_by_pattern(pattern, hash_only=False)
-            unhashed_count = len(all_groups) - len(groups)
-        
-        console.print()
-        console.print(f"[bold blue]🔍 文件搜索结果（模式: {pattern}）[/bold blue]")
-        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-        console.print()
-        
-        if not groups:
-            console.print("  [dim]没有找到匹配的文件[/dim]")
-            if unhashed_count > 0:
-                console.print()
-                console.print(f"  [yellow]提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
-                console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
-        else:
-            console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个匹配的重复文件组")
-            console.print()
-            for i, group in enumerate(groups[:limit], 1):
-                console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
-                console.print(f"    文件大小      {format_size_colored(group['size'])}")
-                console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
-                console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
-                console.print("    匹配的文件:")
-                for j, filepath in enumerate(group['matched_files'][:5], 1):
-                    console.print(f"      [dim]{j}.[/dim] {filepath}")
-                if len(group['matched_files']) > 5:
-                    console.print(f"      [dim]... 还有 {len(group['matched_files']) - 5} 个匹配文件[/dim]")
-                console.print()
-            
-            if len(groups) > limit:
-                console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
-                console.print()
-            
-            if unhashed_count > 0:
-                console.print(f"  [yellow]提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
-                console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
-        
-        console.print()
-        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-        console.print()
-    else:
-        if show_all:
-            conn = analyzer.get_connection()
-            cursor = conn.cursor()
-            
-            normalized_pattern = pattern.replace('\\', '/').lower()
-            
-            query = '''
-                SELECT f.Filename, f.Size, f.Modified, fh.Hash, fh.created_at
-                FROM files f
-                LEFT JOIN file_hash fh ON f.Filename = fh.Filepath
-                WHERE LOWER(REPLACE(f.Filename, '\\\\', '/')) LIKE ?
-                ORDER BY f.Filename
-                LIMIT ?
-            '''
-            cursor.execute(query, (f"{normalized_pattern}%", limit))
-            files = cursor.fetchall()
-            conn.close()
-            
-            console.print()
-            console.print(f"[bold blue]📂 路径 {pattern} 下已索引的文件[/bold blue]")
-            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-            console.print()
-            
-            if not files:
-                console.print("  [dim]没有找到已索引的文件[/dim]")
-            else:
-                for i, (filename, size, modified, hash_val, created_at) in enumerate(files, 1):
-                    hash_status = "[green]已计算[/green]" if hash_val else "[yellow]未计算[/yellow]"
-                    console.print(f"  [dim]{i}.[/dim] {filename}")
-                    console.print(f"    大小: {format_size_colored(size)}    修改时间: [dim]{modified}[/dim]    哈希状态: {hash_status}")
-                    if show_hash and hash_val:
-                        console.print(f"    哈希值: [dim]{hash_val[:16]}...[/dim]")
-                        if created_at:
-                            console.print(f"    计算时间: [dim]{created_at}[/dim]")
-                    console.print()
-            
-            if len(files) >= limit:
-                console.print(f"  [dim]... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）[/dim]")
-            
-            console.print()
-            console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-            console.print()
-        else:
+    def render_output():
+        if has_wildcard or not is_full_path:
             hash_only = not show_all
-            groups = analyzer.get_groups_by_path(pattern, hash_only=hash_only)
+            groups = analyzer.filter_by_pattern(pattern, hash_only=hash_only)
             
             unhashed_count = 0
             if not show_all:
-                all_groups = analyzer.get_groups_by_path(pattern, hash_only=False)
+                all_groups = analyzer.filter_by_pattern(pattern, hash_only=False)
                 unhashed_count = len(all_groups) - len(groups)
             
             console.print()
-            console.print(f"[bold blue]📂 路径 {pattern} 下的重复文件[/bold blue]")
+            console.print(f"[bold blue]🔍 文件搜索结果（模式: {pattern}）[/bold blue]")
             console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
             console.print()
             
             if not groups:
-                console.print("  [dim]没有找到重复文件[/dim]")
+                console.print("  [dim]没有找到匹配的文件[/dim]")
                 if unhashed_count > 0:
                     console.print()
                     console.print(f"  [yellow]提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
                     console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
             else:
-                console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个重复文件组")
+                console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个匹配的重复文件组")
                 console.print()
                 for i, group in enumerate(groups[:limit], 1):
                     console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
                     console.print(f"    文件大小      {format_size_colored(group['size'])}")
                     console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
                     console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
-                    console.print("    包含的文件:")
-                    for j, filepath in enumerate(group['files'][:5], 1):
+                    console.print("    匹配的文件:")
+                    for j, filepath in enumerate(group['matched_files'][:5], 1):
                         console.print(f"      [dim]{j}.[/dim] {filepath}")
-                    if len(group['files']) > 5:
-                        console.print(f"      [dim]... 还有 {len(group['files']) - 5} 个文件[/dim]")
+                    if len(group['matched_files']) > 5:
+                        console.print(f"      [dim]... 还有 {len(group['matched_files']) - 5} 个匹配文件[/dim]")
                     console.print()
                 
                 if len(groups) > limit:
@@ -977,9 +896,104 @@ def files(
             console.print()
             console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
             console.print()
+        else:
+            if show_all:
+                conn = analyzer.get_connection()
+                cursor = conn.cursor()
+                
+                normalized_pattern = pattern.replace('\\', '/').lower()
+                
+                query = '''
+                    SELECT f.Filename, f.Size, f.Modified, fh.Hash, fh.created_at
+                    FROM files f
+                    LEFT JOIN file_hash fh ON f.Filename = fh.Filepath
+                    WHERE LOWER(REPLACE(f.Filename, '\\\\', '/')) LIKE ?
+                    ORDER BY f.Filename
+                    LIMIT ?
+                '''
+                cursor.execute(query, (f"{normalized_pattern}%", limit))
+                files = cursor.fetchall()
+                conn.close()
+                
+                console.print()
+                console.print(f"[bold blue]📂 路径 {pattern} 下已索引的文件[/bold blue]")
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+                
+                if not files:
+                    console.print("  [dim]没有找到已索引的文件[/dim]")
+                else:
+                    for i, (filename, size, modified, hash_val, created_at) in enumerate(files, 1):
+                        hash_status = "[green]已计算[/green]" if hash_val else "[yellow]未计算[/yellow]"
+                        console.print(f"  [dim]{i}.[/dim] {filename}")
+                        console.print(f"    大小: {format_size_colored(size)}    修改时间: [dim]{modified}[/dim]    哈希状态: {hash_status}")
+                        if show_hash and hash_val:
+                            console.print(f"    哈希值: [dim]{hash_val[:16]}...[/dim]")
+                            if created_at:
+                                console.print(f"    计算时间: [dim]{created_at}[/dim]")
+                        console.print()
+                
+                if len(files) >= limit:
+                    console.print(f"  [dim]... 还有更多文件（仅显示前{limit}个，使用 --limit {limit + 100} 显示更多）[/dim]")
+                
+                console.print()
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+            else:
+                hash_only = not show_all
+                groups = analyzer.get_groups_by_path(pattern, hash_only=hash_only)
+                
+                unhashed_count = 0
+                if not show_all:
+                    all_groups = analyzer.get_groups_by_path(pattern, hash_only=False)
+                    unhashed_count = len(all_groups) - len(groups)
+                
+                console.print()
+                console.print(f"[bold blue]📂 路径 {pattern} 下的重复文件[/bold blue]")
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+                
+                if not groups:
+                    console.print("  [dim]没有找到重复文件[/dim]")
+                    if unhashed_count > 0:
+                        console.print()
+                        console.print(f"  [yellow]提示: 有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                        console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
+                else:
+                    console.print(f"  找到 [bold green]{len(groups)}[/bold green] 个重复文件组")
+                    console.print()
+                    for i, group in enumerate(groups[:limit], 1):
+                        console.print(f"  [cyan]{i}. 组ID: {group['group_id']}[/cyan]")
+                        console.print(f"    文件大小      {format_size_colored(group['size'])}")
+                        console.print(f"    文件扩展名    [bold]{group['extension']}[/bold]")
+                        console.print(f"    文件数量      [bold]{group['file_count']}[/bold] 个")
+                        console.print("    包含的文件:")
+                        for j, filepath in enumerate(group['files'][:5], 1):
+                            console.print(f"      [dim]{j}.[/dim] {filepath}")
+                        if len(group['files']) > 5:
+                            console.print(f"      [dim]... 还有 {len(group['files']) - 5} 个文件[/dim]")
+                        console.print()
+                    
+                    if len(groups) > limit:
+                        console.print(f"  [dim]... 还有 {len(groups) - limit} 个组未显示（使用 --limit {limit + 20} 显示更多）[/dim]")
+                        console.print()
+                    
+                    if unhashed_count > 0:
+                        console.print(f"  [yellow]提示: 还有 {unhashed_count} 个组因未计算哈希值而被隐藏[/yellow]")
+                        console.print("  [dim]使用 --all 选项显示所有组（包括未计算哈希的）[/dim]")
+                
+                console.print()
+                console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+                console.print()
+    
+    if pager:
+        with console.pager(styles=True):
+            render_output()
+    else:
+        render_output()
 
 @app.command()
-def hash(hash_value: str):
+def hash(hash_value: str, pager: bool = True):
     """[bold]显示指定哈希值的所有文件[/bold]
     
     [dim]根据哈希值查找所有重复文件[/dim]
@@ -1007,27 +1021,34 @@ def hash(hash_value: str):
         else:
             return f"[bold]{size} B[/bold]"
     
-    console.print()
-    console.print(f"[bold blue]🔑 哈希值 {hash_value[:16]}... 的重复文件[/bold blue]")
-    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-    console.print()
+    def render_output():
+        console.print()
+        console.print(f"[bold blue]🔑 哈希值 {hash_value[:16]}... 的重复文件[/bold blue]")
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
+        
+        if not files:
+            console.print("  [dim]没有找到文件[/dim]")
+        else:
+            for i, file_info in enumerate(files, 1):
+                console.print(f"  [cyan]{i}. 文件路径[/cyan]")
+                console.print(f"    {file_info['filepath']}")
+                console.print("  [dim]───────────────────────────────────────────────[/dim]")
+                console.print(f"    磁盘        [bold]{file_info['disk']}[/bold]")
+                console.print(f"    大小        {format_size_colored(file_info['size'])}")
+                console.print(f"    修改时间    [dim]{file_info['modified']}[/dim]")
+                console.print(f"    哈希值      [dim]{file_info['hash'][:16]}...[/dim]")
+                console.print(f"    计算时间    [dim]{file_info['created_at']}[/dim]")
+                console.print()
+        
+        console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
+        console.print()
     
-    if not files:
-        console.print("  [dim]没有找到文件[/dim]")
+    if pager:
+        with console.pager(styles=True):
+            render_output()
     else:
-        for i, file_info in enumerate(files, 1):
-            console.print(f"  [cyan]{i}. 文件路径[/cyan]")
-            console.print(f"    {file_info['filepath']}")
-            console.print("  [dim]───────────────────────────────────────────────[/dim]")
-            console.print(f"    磁盘        [bold]{file_info['disk']}[/bold]")
-            console.print(f"    大小        {format_size_colored(file_info['size'])}")
-            console.print(f"    修改时间    [dim]{file_info['modified']}[/dim]")
-            console.print(f"    哈希值      [dim]{file_info['hash'][:16]}...[/dim]")
-            console.print(f"    计算时间    [dim]{file_info['created_at']}[/dim]")
-            console.print()
-    
-    console.print("[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
-    console.print()
+        render_output()
 
 @app.command()
 def stats(
