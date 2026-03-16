@@ -59,3 +59,36 @@ class TestHelpCommand:
         assert 'show' in captured.out
         assert 'hash' in captured.out
         assert 'index' in captured.out
+
+
+class TestProgName:
+    """测试程序名显示"""
+    
+    def test_interactive_mode_prog_name(self, capsys):
+        """测试交互式模式下显示duplicate>"""
+        with pytest.raises(SystemExit):
+            app(['clean', '--help'], prog_name='duplicate>')
+        
+        captured = capsys.readouterr()
+        assert 'duplicate>' in captured.out
+        assert 'clean' in captured.out
+    
+    def test_command_line_mode_prog_name(self, capsys):
+        """测试命令行模式下显示脚本名"""
+        sys.argv = ['main.py', 'clean', '--help']
+        with pytest.raises(SystemExit):
+            app()
+        
+        captured = capsys.readouterr()
+        assert 'Usage:' in captured.out
+        assert 'clean' in captured.out
+    
+    def test_interactive_help_command(self, capsys):
+        """测试交互式模式下help <command>格式"""
+        with pytest.raises(SystemExit):
+            app(['show', '--help'], prog_name='duplicate>')
+        
+        captured = capsys.readouterr()
+        assert 'duplicate>' in captured.out
+        assert 'show' in captured.out
+        assert 'groups' in captured.out

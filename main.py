@@ -376,9 +376,8 @@ def interactive_mode():
             if user_input_lower.startswith('help '):
                 command = user_input_lower[5:].strip()
                 if command:
-                    sys.argv = ['duplicate', command, '--help']
                     try:
-                        app()
+                        app([command, '--help'], prog_name='duplicate>')
                     except SystemExit:
                         pass
                     continue
@@ -388,9 +387,8 @@ def interactive_mode():
                 continue
             
             # 执行命令
-            sys.argv = ['duplicate'] + user_input.split()
             try:
-                app()
+                app(user_input.split(), prog_name='duplicate>')
             except SystemExit:
                 # 忽略 Typer 的 SystemExit
                 pass
