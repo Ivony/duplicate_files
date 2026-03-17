@@ -21,7 +21,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from commands.db import get_db_path
+from core.database import get_db_path
 
 app = typer.Typer(
     name="clean",

@@ -12,7 +12,7 @@ from datetime import datetime
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from commands.config import ConfigManager
-from commands.db import get_db_path
+from core.database import get_db_path
 
 try:
     import xxhash

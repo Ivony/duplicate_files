@@ -2,7 +2,7 @@ import pytest
 import os
 import tempfile
 import sqlite3
-from commands.db import DatabaseManager, set_db_path
+from core.database import DatabaseManager, set_db_path
 
 @pytest.fixture
 def temp_dir():
@@ -23,9 +23,9 @@ def temp_db(tmp_path):
 @pytest.fixture(autouse=True)
 def isolate_db(temp_db, monkeypatch):
     """自动隔离数据库，确保测试不会影响实际数据库"""
-    import commands.db
-    monkeypatch.setattr(commands.db, 'DB_PATH', temp_db)
-    monkeypatch.setattr(commands.db, 'get_db_path', lambda: temp_db)
+    import core.database
+    monkeypatch.setattr(core.database, 'DB_PATH', temp_db)
+    monkeypatch.setattr(core.database, 'get_db_path', lambda: temp_db)
     yield
 
 @pytest.fixture

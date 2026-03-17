@@ -3,7 +3,7 @@ import os
 import sys
 import sqlite3
 from commands.hash import app, HashCalculator
-from commands.db import DatabaseManager
+from core.database import DatabaseManager
 
 class TestHashCommand:
     def test_calc_command(self, temp_dir, capsys):
